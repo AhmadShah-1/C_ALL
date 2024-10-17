@@ -2,3 +2,10 @@
 Shows how to represent lidar data:
 https://medium.com/spatial-data-science/an-easy-way-to-work-and-visualize-lidar-data-in-python-eed0e028996c#:~:text=This%20blog%20post%20will%20teach%20you%20an%20easy,data%20processing%2C%20to%20visualize%20the%203D%20lidar%20data.
 
+Setting up macos virtual environment:
+
+
+
+ARKit Documentation:
+https://developer.apple.com/documentation/avfoundation/additional_data_capture/capturing_depth_using_the_lidar_camera
+
