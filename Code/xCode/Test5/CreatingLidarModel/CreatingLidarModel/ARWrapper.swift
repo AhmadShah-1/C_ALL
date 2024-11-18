@@ -11,7 +11,8 @@ import ARKit
 
 struct ARWrapper: UIViewRepresentable{
     @Binding var submittedExportRequest: Bool
-    @Binding var exportedURL: URL?
+    // @Binding var exportedURL: URL?
+    @Binding var submittedName: String
     
     let arView = ARView(frame: .zero)
     func makeUIView(context: Context) -> ARView{
@@ -31,8 +32,8 @@ struct ARWrapper: UIViewRepresentable{
                let asset = vm.convertToAssest(meshAnchor: meshAnchors, camera: camera){
                 do{
                     //try  saving to local directory
-                    let url = try vm.export(asset: asset)
-                    exportedURL = url
+                    try ExportViewModel().export(asset: asset, fileName: submittedName)
+                    
                 }catch{
                     print("Export Failure")
                 }
@@ -79,7 +80,7 @@ class ExportViewModel: NSObject, ObservableObject, ARSessionDelegate{
     }
     
     // File manager saves info on the clients device
-    func export(asset: MDLAsset) throws -> URL{
+    func export(asset: MDLAsset, fileName: String) throws -> URL{
         guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             throw NSError(domain: "com.original.CreatingLidarModel", code: 153)
         }
@@ -91,7 +92,7 @@ class ExportViewModel: NSObject, ObservableObject, ARSessionDelegate{
         try? FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true, attributes: nil)
         
         // Create unique file name using uuid to create unique ones
-        let url = folderURL.appendingPathComponent("\(UUID().uuidString).obj")
+        let url = folderURL.appendingPathComponent("\(fileName.isEmpty ? UUID().uuidString : fileName).obj")
         
         do{
             try asset.export(to: url)
