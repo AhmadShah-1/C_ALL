@@ -2,7 +2,6 @@
 //  Mesh+Ext.swift
 //  VirtualShowrooms
 //
-//  Created by Kelvin J on 5/17/23.
 //
 
 import RealityKit
@@ -67,9 +66,4 @@ extension ARMeshGeometry {
         
         return mesh
     }
-}
-
-
-extension URL: Identifiable {
-    public var id: Self { self }
 }

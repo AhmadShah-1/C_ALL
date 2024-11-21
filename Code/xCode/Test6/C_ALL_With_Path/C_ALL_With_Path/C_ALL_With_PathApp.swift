@@ -1,4 +1,3 @@
-//
 //  CreatingLidarModelApp.swift
 //  CreatingLidarModel
 //
@@ -10,8 +9,8 @@ import SwiftData
 import ARKit
 
 @main
-struct CreatingLidarModelApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+struct C_ALL_With_PathApp: App {
+    @UIApplicationDelegateAdaptor(AppdDelegate.self) var appDelegate
     
     // Maybe Remove
     /*
@@ -45,15 +44,11 @@ struct CreatingLidarModelApp: App {
     }
 }
 
-class AppDelegate: NSObject, UIApplicationDelegate {
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        // Perform any necessary setup or initialization here
-        if !ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
-
+class AppdDelegate: NSObject, UIApplicationDelegate{
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool{
+        if !ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth){
             print("does not support AR")
         }
         return true
     }
-    
-    // Include other AppDelegate methods as needed
 }

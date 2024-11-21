@@ -1,12 +1,9 @@
 //
-//  FetchModelView.swift
-//  CreatingLidarModel
+//  FetchModel.swift
+//  VirtualShowrooms
 //
-//  Created by SSW - Design Team  on 11/17/24.
+//  Created by Kelvin J on 5/18/23.
 //
-
-
-// Fetch 3d model and display in the side
 
 import SwiftUI
 import SceneKit
@@ -139,10 +136,3 @@ struct SceneViewWrapper: UIViewRepresentable {
     }
     func updateUIView(_ uiView: UIViewType, context: Context) { }
 }
-
-
-/*
-#Preview {
-    FetchModelView()
-}
-*/

@@ -1,12 +1,11 @@
 //
 //  ContentView.swift
-//  CreatingLidarModel
+//  VirtualShowrooms
 //
-//  Created by SSW - Design Team  on 11/14/24.
+//  Created by Kelvin J on 5/17/23.
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
     @State private var submittedExportRequest = false
@@ -16,7 +15,7 @@ struct ContentView: View {
         HStack {
             FetchModelView()
             VStack {
-                ARWrapper(submittedExportRequest: self.$submittedExportRequest, submittedName: self.$submittedName)
+                ARViewWrapper(submittedExportRequest: self.$submittedExportRequest, submittedName: self.$submittedName)
                     .ignoresSafeArea()
                 
                 Button("Export") {
@@ -36,15 +35,13 @@ struct ContentView: View {
     }
 }
 
-
-struct ContentView_Previews: PreviewProvider{
-    static var previews: some View{
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
         ContentView()
     }
 }
-    
 
-// This is a custom alert, that provides a text field that allows you to enter a file name, also a cancel and save button
+
 extension View {
     func alertTF(title: String, message: String, hintText: String, primaryTitle: String, secondaryTitle: String, primaryAction: @escaping (String) -> (), secondaryAction: @escaping () -> ()) {
         
@@ -81,61 +78,3 @@ extension View {
         return root
     }
 }
-    
-    
-    
-    
-    
-    
-    /*
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
-
-    var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
-    }
-}
-
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
-}
-*/
