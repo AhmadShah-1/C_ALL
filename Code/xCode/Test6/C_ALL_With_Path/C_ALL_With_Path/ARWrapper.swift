@@ -1,289 +1,404 @@
 import SwiftUI
 import RealityKit
 import ARKit
+import AVFoundation
+import CoreLocation
+import UIKit
 
-// ARWrapper is a UIViewRepresentable that integrates UIKit's UIView into SwiftUI.
-// It wraps an ARView and provides AR functionalities within a SwiftUI view.
 struct ARWrapper: UIViewRepresentable {
-    // Bindings to track export requests and submitted names (if needed elsewhere in your app).
     @Binding var submittedExportRequest: Bool
     @Binding var submittedName: String
 
-    // The ARView that will display the AR content.
     let arView = ARView(frame: .zero)
 
-    // This function creates and configures the ARView when the SwiftUI view is initialized.
     func makeUIView(context: Context) -> ARView {
-        // Configure ARView options such as debug options.
-        setARViewOptions(arView)
-        // Build and configure the AR session.
-        let configuration = buildConfiguration()
-        // Run the AR session with the specified configuration.
-        arView.session.run(configuration)
-        // Set the session delegate to the Coordinator for AR session callbacks.
-        arView.session.delegate = context.coordinator
+        checkCameraAccess { granted in
+            if granted {
+                DispatchQueue.main.async {
+                    setupARView(context: context)
+                }
+            } else {
+                print("Camera access not granted.")
+            }
+        }
         return arView
     }
 
-    // This function updates the ARView when the SwiftUI view updates.
     func updateUIView(_ uiView: ARView, context: Context) { }
 
-    // Creates a Coordinator object to act as the delegate for AR session updates.
     func makeCoordinator() -> Coordinator {
         return Coordinator(arView: arView)
     }
 
-    // Builds and returns an ARWorldTrackingConfiguration with desired settings.
+    private func setupARView(context: Context) {
+        guard ARWorldTrackingConfiguration.isSupported else {
+            print("ARWorldTrackingConfiguration is not supported on this device.")
+            return
+        }
+
+        setARViewOptions(arView)
+        let configuration = buildConfiguration()
+
+        arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+
+        arView.session.delegate = context.coordinator
+    }
+
     private func buildConfiguration() -> ARWorldTrackingConfiguration {
         let configuration = ARWorldTrackingConfiguration()
-        // Enable environment texturing for realistic reflections.
         configuration.environmentTexturing = .automatic
-        // Enable scene reconstruction to build a mesh of the environment.
         configuration.sceneReconstruction = .meshWithClassification
-        // Detect horizontal planes (e.g., floors, tables).
         configuration.planeDetection = [.horizontal]
-        // Enable frame semantics to receive scene depth information.
         configuration.frameSemantics = .sceneDepth
+
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
+            configuration.sceneReconstruction = .meshWithClassification
+        } else {
+            print("Scene reconstruction not supported on this device.")
+        }
+
         return configuration
     }
 
-    // Sets various options for the ARView.
     private func setARViewOptions(_ arView: ARView) {
-        // Show scene understanding visualization (e.g., detected planes, meshes).
-        arView.debugOptions.insert(.showSceneUnderstanding)
-        // Prevent ARView from automatically configuring the session, as we do it manually.
+        arView.debugOptions = [.showFeaturePoints, .showWorldOrigin, .showAnchorOrigins]
         arView.automaticallyConfigureSession = false
     }
 
-    // Coordinator class acts as the ARSessionDelegate to handle AR session updates.
-    class Coordinator: NSObject, ARSessionDelegate {
-        // Reference to the ARView.
-        var arView: ARView
-        // Array to keep track of the last path anchors added to the scene, so we can remove them later.
-        var lastPathAnchors: [AnchorEntity] = []
-        // Timestamp of the last update, used to limit update frequency.
-        var lastUpdateTime: TimeInterval = 0
+    private func checkCameraAccess(completion: @escaping (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                completion(granted)
+            }
+        case .denied, .restricted:
+            completion(false)
+        @unknown default:
+            fatalError("Unknown authorization status for camera.")
+        }
+    }
 
-        // Initialize the Coordinator with a reference to the ARView.
+    class Coordinator: NSObject, ARSessionDelegate, ARSessionObserver, CLLocationManagerDelegate {
+        var arView: ARView
+        var locationManager: CLLocationManager
+        var currentHeading: Double?
+        var lastPathAnchors: [AnchorEntity] = []
+        var lastUpdateTime: TimeInterval = 0
+        var estimatedFloorY: Float?
+        let floorHeightTolerance: Float = 0.05
+        var initialUserPosition: SIMD3<Float>?
+        let movementThreshold: Float = 0.5 // Update path if user moves more than 0.5 meters
+
         init(arView: ARView) {
             self.arView = arView
+            self.locationManager = CLLocationManager()
+            super.init()
+            self.locationManager.delegate = self
+            self.locationManager.requestWhenInUseAuthorization()
+            if CLLocationManager.headingAvailable() {
+                self.locationManager.startUpdatingHeading()
+            } else {
+                print("Heading not available")
+            }
         }
 
-        // Called every time the ARSession updates (i.e., every frame).
-        func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            // Limit the frequency of path updates to avoid performance issues.
-            let currentTime = frame.timestamp
-            if currentTime - lastUpdateTime < 0.5 {
-                // If less than 0.5 seconds have passed since the last update, skip this frame.
+        // CLLocationManagerDelegate methods
+        func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+            if newHeading.headingAccuracy < 0 {
+                print("Invalid heading")
                 return
             }
-            // Update the timestamp of the last update.
-            lastUpdateTime = currentTime
-            // Call the function to update the path.
-            updatePath()
+            self.currentHeading = newHeading.trueHeading
+            // No need to print every heading update
         }
 
-        // Function to update the path displayed in the AR scene.
-        private func updatePath() {
-            // Remove the previous path anchors from the scene to prevent clutter.
+        func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+            switch status {
+            case .authorizedWhenInUse, .authorizedAlways:
+                if CLLocationManager.headingAvailable() {
+                    locationManager.startUpdatingHeading()
+                } else {
+                    print("Heading not available")
+                }
+            case .denied, .restricted:
+                print("Location access denied or restricted")
+            default:
+                break
+            }
+        }
+
+        func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+            print("Location manager failed with error: \(error.localizedDescription)")
+        }
+
+        func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            // Limit update frequency
+            let currentTime = frame.timestamp
+            if currentTime - lastUpdateTime < 0.5 {
+                return
+            }
+
+            guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
+                print("Camera transform is unavailable")
+                return
+            }
+
+            guard estimatedFloorY != nil else {
+                print("Floor not yet detected. Waiting to update path.")
+                return
+            }
+
+            guard currentHeading != nil else {
+                print("Waiting for heading data")
+                return
+            }
+
+            // Get current user position
+            let currentUserPosition = SIMD3<Float>(
+                x: cameraTransform.translation.x,
+                y: estimatedFloorY!,
+                z: cameraTransform.translation.z
+            )
+
+            // Initialize initialUserPosition if not set
+            if initialUserPosition == nil {
+                initialUserPosition = currentUserPosition
+                // Place the test cube at the initial position
+                addTestCube(at: initialUserPosition!)
+                // Generate the initial path
+                updatePath(from: initialUserPosition!)
+            } else {
+                // Check if user has moved beyond the threshold
+                let distanceMoved = simd_distance(currentUserPosition, initialUserPosition!)
+                if distanceMoved > movementThreshold {
+                    // Update the path from the new position
+                    initialUserPosition = currentUserPosition
+                    // Place the test cube at the new position
+                    addTestCube(at: initialUserPosition!)
+                    updatePath(from: initialUserPosition!)
+                } else {
+                    // Do not update the path if user hasn't moved significantly
+                    print("User hasn't moved significantly; not updating path.")
+                }
+            }
+
+            lastUpdateTime = currentTime
+        }
+
+        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            for anchor in anchors {
+                if let planeAnchor = anchor as? ARPlaneAnchor, planeAnchor.alignment == .horizontal {
+                    updateEstimatedFloorY(with: planeAnchor)
+                }
+            }
+        }
+
+        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            for anchor in anchors {
+                if let planeAnchor = anchor as? ARPlaneAnchor, planeAnchor.alignment == .horizontal {
+                    updateEstimatedFloorY(with: planeAnchor)
+                }
+            }
+        }
+
+        private func updateEstimatedFloorY(with planeAnchor: ARPlaneAnchor) {
+            if #available(iOS 13.0, *) {
+                if planeAnchor.classification == .floor {
+                    estimatedFloorY = planeAnchor.transform.translation.y
+                    return
+                }
+            }
+
+            let planeY = planeAnchor.transform.translation.y
+            if let currentFloorY = estimatedFloorY {
+                if planeY < currentFloorY {
+                    estimatedFloorY = planeY
+                }
+            } else {
+                estimatedFloorY = planeY
+            }
+        }
+
+        func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+            // Handle tracking state changes if necessary
+        }
+
+        func session(_ session: ARSession, didFailWithError error: Error) {
+            print("ARSession did fail with error: \(error.localizedDescription)")
+        }
+
+        func sessionWasInterrupted(_ session: ARSession) {
+            print("ARSession was interrupted.")
+        }
+
+        func sessionInterruptionEnded(_ session: ARSession) {
+            print("ARSession interruption ended.")
+        }
+
+        private func updatePath(from startingPosition: SIMD3<Float>) {
+            // Remove previous path anchors
             for anchor in lastPathAnchors {
                 arView.scene.removeAnchor(anchor)
             }
-            // Clear the list of last path anchors.
             lastPathAnchors.removeAll()
 
-            // Get the current camera transform to determine the user's position and orientation.
-            guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
-                // If the camera transform is unavailable, exit the function.
+            guard let estimatedFloorY = estimatedFloorY else {
+                print("Floor not yet detected. Waiting to update path.")
                 return
             }
 
-            // Perform a downward raycast from the camera position to find the floor.
-            let cameraPosition = cameraTransform.translation
-            let raycastQuery = ARRaycastQuery(
-                origin: cameraPosition,
-                direction: SIMD3<Float>(0, -1, 0), // Downward direction.
-                allowing: .estimatedPlane,
-                alignment: .horizontal
+            guard let heading = currentHeading else {
+                print("Waiting for heading data")
+                return
+            }
+
+            // Convert heading to radians and calculate the North direction vector
+            let headingRadians = Float(heading * (.pi / 180.0))
+            let northDirection = SIMD3<Float>(
+                x: sin(headingRadians),
+                y: 0,
+                z: -cos(headingRadians)
             )
 
-            // Execute the raycast query to find intersections with horizontal planes (floors).
-            guard let result = arView.session.raycast(raycastQuery).first else {
-                // If no floor is detected, log and exit the function.
-                print("No floor detected")
-                return
-            }
-
-            // The starting position for the path is the point where the raycast hit the floor.
-            let startingPosition = result.worldTransform.translation
-
-            // Generate the path starting from the startingPosition.
-            let pathAnchors = createPath(from: startingPosition, cameraTransform: cameraTransform)
-            // Keep track of the new path anchors to remove them later.
+            // Generate the path starting from the startingPosition towards North
+            let pathAnchors = createPath(from: startingPosition, direction: northDirection)
             lastPathAnchors.append(contentsOf: pathAnchors)
 
-            // Add each path anchor to the AR scene.
+            // Add each path anchor to the AR scene
             for anchor in pathAnchors {
                 arView.scene.addAnchor(anchor)
             }
         }
 
-        // Function to create the path anchors starting from a given position.
-        private func createPath(from startingPosition: SIMD3<Float>, cameraTransform: simd_float4x4) -> [AnchorEntity] {
+        private func addTestCube(at position: SIMD3<Float>) {
+            // Remove existing test cube if any
+            if let existingCube = arView.scene.findEntity(named: "TestCube") {
+                existingCube.removeFromParent()
+            }
+
+            let material = SimpleMaterial(color: UIColor.blue, isMetallic: false)
+            let testCube = ModelEntity(mesh: .generateBox(size: 0.1), materials: [material])
+            testCube.name = "TestCube"
+            let testAnchor = AnchorEntity(world: position)
+            testAnchor.addChild(testCube)
+            arView.scene.addAnchor(testAnchor)
+        }
+
+        private func createPath(from startingPosition: SIMD3<Float>, direction: SIMD3<Float>) -> [AnchorEntity] {
             var anchors: [AnchorEntity] = []
-            let pathSegmentLength: Float = 0.5 // Length of each path segment in meters.
-            let numberOfSegments = 20          // Total number of path segments to create.
+            let pathSegmentLength: Float = 0.5
+            let numberOfSegments = 20
 
             var currentPosition = startingPosition
+            var currentDirection = normalize(direction)
 
-            // Calculate the forward direction based on the camera's orientation.
-            var forwardVector = -normalize(cameraTransform.columns.2.xyz)
-            forwardVector.y = 0 // Ignore vertical component to keep movement on the horizontal plane.
-            forwardVector = normalize(forwardVector)
-
-            // The direction the path will proceed in; initially set to the forward vector.
-            var direction = forwardVector
-
-            // Loop to create each segment of the path.
             for _ in 0..<numberOfSegments {
-                // Calculate the next position by moving along the direction vector.
-                let nextPosition = currentPosition + direction * pathSegmentLength
+                let nextPosition = currentPosition + currentDirection * pathSegmentLength
+                var adjustedNextPosition = nextPosition
+                adjustedNextPosition.y = estimatedFloorY!
 
-                // Raycast downward from the nextPosition to find the floor at that point.
-                let raycastQuery = ARRaycastQuery(
-                    origin: nextPosition + SIMD3<Float>(0, 0.5, 0), // Slightly above to avoid intersecting with the floor.
-                    direction: SIMD3<Float>(0, -1, 0), // Downward direction.
-                    allowing: .estimatedPlane,
-                    alignment: .horizontal
-                )
-
-                // Execute the raycast to find the floor.
-                guard let result = arView.session.raycast(raycastQuery).first else {
-                    // If no floor is detected at the next position, stop generating the path.
-                    print("No floor detected at next position")
-                    break
-                }
-
-                // The exact position on the floor where the path segment will be placed.
-                let pathPosition = result.worldTransform.translation
-
-                // Check for obstacles in the current direction.
+                // Obstacle detection
                 let obstacleDetected = isObstacleInDirection(
                     from: currentPosition,
-                    direction: direction,
+                    direction: currentDirection,
                     distance: pathSegmentLength
                 )
 
                 if obstacleDetected {
-                    // If an obstacle is detected, attempt to adjust the path direction.
+                    // Adjust the direction to avoid obstacle
                     let adjusted = adjustDirection(
-                        &direction,
-                        forwardVector: forwardVector,
+                        &currentDirection,
+                        initialDirection: direction,
                         from: currentPosition,
                         pathSegmentLength: pathSegmentLength
                     )
                     if !adjusted {
-                        // If unable to adjust the path to avoid the obstacle, stop generating the path.
                         print("Cannot find path around obstacle")
                         break
                     } else {
-                        // If the direction was adjusted, retry generating the next segment with the new direction.
+                        print("Adjusted direction to avoid obstacle")
                         continue
                     }
                 } else {
-                    // If no obstacle is detected, create a path segment at the pathPosition.
-                    let pathAnchor = AnchorEntity(world: pathPosition)
-                    // Use an unlit material with a green color for the path segment.
-                    let material = UnlitMaterial(color: .green)
-                    // Create a plane to represent the path segment.
+                    // Create a path segment at the adjustedNextPosition
+                    let pathAnchor = AnchorEntity(world: adjustedNextPosition)
+
+                    let material = SimpleMaterial(color: UIColor.red, isMetallic: false)
                     let pathEntity = ModelEntity(
-                        mesh: .generatePlane(width: 0.3, depth: pathSegmentLength),
+                        mesh: .generateBox(size: [0.3, 0.01, 0.3]),
                         materials: [material]
                     )
-                    // Rotate the plane to lie flat on the floor.
-                    pathEntity.transform.rotation = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
-                    // Adjust the position so that the plane extends forward from the anchor.
-                    pathEntity.position.z -= pathSegmentLength / 2
-                    // Add the path entity to the anchor.
+
+                    pathEntity.scale = SIMD3<Float>(repeating: 1.0)
                     pathAnchor.addChild(pathEntity)
-                    // Add the anchor to the list of anchors to be added to the scene.
                     anchors.append(pathAnchor)
 
-                    // Update the current position for the next segment.
-                    currentPosition = nextPosition
-                    // Reset the direction to the forward vector after a successful placement.
-                    direction = forwardVector
+                    currentPosition = adjustedNextPosition
+                    // Keep currentDirection as adjusted
                 }
             }
             return anchors
         }
 
-        // Function to adjust the direction of the path to avoid obstacles.
         private func adjustDirection(
             _ direction: inout SIMD3<Float>,
-            forwardVector: SIMD3<Float>,
+            initialDirection: SIMD3<Float>,
             from position: SIMD3<Float>,
             pathSegmentLength: Float
         ) -> Bool {
-            // Try rotating the direction in increments to the left and right.
+            // Try rotating the direction in increments to the left and right
             for angle in stride(from: 15, through: 90, by: 15) {
                 let radians = Float(angle) * .pi / 180
-                // Rotate to the right.
+                // Rotate to the right
                 var rotationMatrix = simd_float3x3(simd_quatf(angle: -radians, axis: SIMD3<Float>(0, 1, 0)))
-                var newDirection = normalize(rotationMatrix * forwardVector)
+                var newDirection = normalize(rotationMatrix * initialDirection)
                 if !isObstacleInDirection(from: position, direction: newDirection, distance: pathSegmentLength) {
-                    // If no obstacle is detected in the new direction, update the direction and return true.
                     direction = newDirection
                     return true
                 }
-                // Rotate to the left.
+                // Rotate to the left
                 rotationMatrix = simd_float3x3(simd_quatf(angle: radians, axis: SIMD3<Float>(0, 1, 0)))
-                newDirection = normalize(rotationMatrix * forwardVector)
+                newDirection = normalize(rotationMatrix * initialDirection)
                 if !isObstacleInDirection(from: position, direction: newDirection, distance: pathSegmentLength) {
-                    // If no obstacle is detected in the new direction, update the direction and return true.
                     direction = newDirection
                     return true
                 }
             }
-            // If no suitable direction is found, return false.
             return false
         }
 
-        // Function to check if there is an obstacle in a given direction within a certain distance.
         private func isObstacleInDirection(
             from position: SIMD3<Float>,
             direction: SIMD3<Float>,
             distance: Float
         ) -> Bool {
-            // Create a raycast query in the given direction.
             let obstacleQuery = ARRaycastQuery(
-                origin: position + SIMD3<Float>(0, 0.5, 0), // Slightly above to avoid ground interference.
+                origin: position + SIMD3<Float>(0, 0.1, 0), // Slightly above floor level
                 direction: direction,
-                allowing: .existingPlaneGeometry,
+                allowing: .estimatedPlane,
                 alignment: .any
             )
-            // Execute the raycast to detect obstacles.
             let obstacleResults = arView.session.raycast(obstacleQuery)
             if let obstacleResult = obstacleResults.first {
-                // Calculate the distance to the detected obstacle.
                 let obstacleDistance = simd_distance(position, obstacleResult.worldTransform.translation)
-                // If the obstacle is within the specified distance, return true.
-                return obstacleDistance < distance
+                if obstacleDistance < distance {
+                    return true
+                }
             }
-            // If no obstacle is detected, return false.
             return false
         }
     }
 }
 
-// Extension to extract the translation (position) from a 4x4 transformation matrix.
+// Extensions to extract translation from transform matrices
 extension simd_float4x4 {
     var translation: SIMD3<Float> {
         return SIMD3<Float>(columns.3.x, columns.3.y, columns.3.z)
     }
 }
 
-// Extension to extract the x, y, z components from a simd_float4 (ignoring w component).
 extension simd_float4 {
     var xyz: SIMD3<Float> {
         return SIMD3<Float>(x, y, z)

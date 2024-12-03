@@ -10,7 +10,7 @@ import ARKit
 
 @main
 struct C_ALL_With_PathApp: App {
-    @UIApplicationDelegateAdaptor(AppdDelegate.self) var appDelegate
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     // Maybe Remove
     /*
@@ -44,10 +44,11 @@ struct C_ALL_With_PathApp: App {
     }
 }
 
-class AppdDelegate: NSObject, UIApplicationDelegate{
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool{
-        if !ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth){
-            print("does not support AR")
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        if !ARWorldTrackingConfiguration.isSupported {
+            print("ARWorldTrackingConfiguration is not supported on this device.")
         }
         return true
     }
