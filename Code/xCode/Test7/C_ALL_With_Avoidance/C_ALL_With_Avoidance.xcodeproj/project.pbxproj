@@ -6,75 +6,76 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		08ECB2F62CFF8B8600C8008D /* RealityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 08ECB2F52CFF8B8600C8008D /* RealityKit.framework */; };
-		08ECB2F82CFF8B9100C8008D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 08ECB2F72CFF8B9100C8008D /* Metal.framework */; };
-		08ECB2FA2CFF8B9700C8008D /* ARKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 08ECB2F92CFF8B9700C8008D /* ARKit.framework */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXContainerItemProxy section */
-		08FB41362CEC30C2006923B8 /* PBXContainerItemProxy */ = {
+		08ECB3702D0A0C6C00C8008D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 08FB411B2CEC30BD006923B8 /* Project object */;
+			containerPortal = 08ECB3552D0A0C6900C8008D /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 08FB41222CEC30BD006923B8;
-			remoteInfo = C_ALL_With_Path;
+			remoteGlobalIDString = 08ECB35C2D0A0C6900C8008D;
+			remoteInfo = C_ALL_With_Avoidance;
 		};
-		08FB41402CEC30C2006923B8 /* PBXContainerItemProxy */ = {
+		08ECB37A2D0A0C6C00C8008D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 08FB411B2CEC30BD006923B8 /* Project object */;
+			containerPortal = 08ECB3552D0A0C6900C8008D /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 08FB41222CEC30BD006923B8;
-			remoteInfo = C_ALL_With_Path;
+			remoteGlobalIDString = 08ECB35C2D0A0C6900C8008D;
+			remoteInfo = C_ALL_With_Avoidance;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		08ECB2F52CFF8B8600C8008D /* RealityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RealityKit.framework; path = System/Library/Frameworks/RealityKit.framework; sourceTree = SDKROOT; };
-		08ECB2F72CFF8B9100C8008D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		08ECB2F92CFF8B9700C8008D /* ARKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ARKit.framework; path = System/Library/Frameworks/ARKit.framework; sourceTree = SDKROOT; };
-		08FB41232CEC30BD006923B8 /* C_ALL_With_Path.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = C_ALL_With_Path.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		08FB41352CEC30C2006923B8 /* C_ALL_With_PathTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = C_ALL_With_PathTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		08FB413F2CEC30C2006923B8 /* C_ALL_With_PathUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = C_ALL_With_PathUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		08ECB35D2D0A0C6900C8008D /* C_ALL_With_Avoidance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = C_ALL_With_Avoidance.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		08ECB36F2D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = C_ALL_With_AvoidanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		08ECB3792D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = C_ALL_With_AvoidanceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		08ECB3922D0A0DBE00C8008D /* Exceptions for "C_ALL_With_Avoidance" folder in "C_ALL_With_Avoidance" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Untitled.swift,
+			);
+			target = 08ECB35C2D0A0C6900C8008D /* C_ALL_With_Avoidance */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		08FB41252CEC30BD006923B8 /* C_ALL_With_Path */ = {
+		08ECB35F2D0A0C6900C8008D /* C_ALL_With_Avoidance */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = C_ALL_With_Path;
+			exceptions = (
+				08ECB3922D0A0DBE00C8008D /* Exceptions for "C_ALL_With_Avoidance" folder in "C_ALL_With_Avoidance" target */,
+			);
+			path = C_ALL_With_Avoidance;
 			sourceTree = "<group>";
 		};
-		08FB41382CEC30C2006923B8 /* C_ALL_With_PathTests */ = {
+		08ECB3722D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = C_ALL_With_PathTests;
+			path = C_ALL_With_AvoidanceTests;
 			sourceTree = "<group>";
 		};
-		08FB41422CEC30C2006923B8 /* C_ALL_With_PathUITests */ = {
+		08ECB37C2D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = C_ALL_With_PathUITests;
+			path = C_ALL_With_AvoidanceUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		08FB41202CEC30BD006923B8 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				08ECB2FA2CFF8B9700C8008D /* ARKit.framework in Frameworks */,
-				08ECB2F82CFF8B9100C8008D /* Metal.framework in Frameworks */,
-				08ECB2F62CFF8B8600C8008D /* RealityKit.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		08FB41322CEC30C2006923B8 /* Frameworks */ = {
+		08ECB35A2D0A0C6900C8008D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		08FB413C2CEC30C2006923B8 /* Frameworks */ = {
+		08ECB36C2D0A0C6C00C8008D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		08ECB3762D0A0C6C00C8008D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -84,33 +85,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		08ECB2F42CFF8B8600C8008D /* Frameworks */ = {
+		08ECB3542D0A0C6900C8008D = {
 			isa = PBXGroup;
 			children = (
-				08ECB2F92CFF8B9700C8008D /* ARKit.framework */,
-				08ECB2F72CFF8B9100C8008D /* Metal.framework */,
-				08ECB2F52CFF8B8600C8008D /* RealityKit.framework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		08FB411A2CEC30BD006923B8 = {
-			isa = PBXGroup;
-			children = (
-				08FB41252CEC30BD006923B8 /* C_ALL_With_Path */,
-				08FB41382CEC30C2006923B8 /* C_ALL_With_PathTests */,
-				08FB41422CEC30C2006923B8 /* C_ALL_With_PathUITests */,
-				08ECB2F42CFF8B8600C8008D /* Frameworks */,
-				08FB41242CEC30BD006923B8 /* Products */,
+				08ECB35F2D0A0C6900C8008D /* C_ALL_With_Avoidance */,
+				08ECB3722D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests */,
+				08ECB37C2D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests */,
+				08ECB35E2D0A0C6900C8008D /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		08FB41242CEC30BD006923B8 /* Products */ = {
+		08ECB35E2D0A0C6900C8008D /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				08FB41232CEC30BD006923B8 /* C_ALL_With_Path.app */,
-				08FB41352CEC30C2006923B8 /* C_ALL_With_PathTests.xctest */,
-				08FB413F2CEC30C2006923B8 /* C_ALL_With_PathUITests.xctest */,
+				08ECB35D2D0A0C6900C8008D /* C_ALL_With_Avoidance.app */,
+				08ECB36F2D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests.xctest */,
+				08ECB3792D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -118,134 +108,134 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		08FB41222CEC30BD006923B8 /* C_ALL_With_Path */ = {
+		08ECB35C2D0A0C6900C8008D /* C_ALL_With_Avoidance */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 08FB41492CEC30C2006923B8 /* Build configuration list for PBXNativeTarget "C_ALL_With_Path" */;
+			buildConfigurationList = 08ECB3832D0A0C6C00C8008D /* Build configuration list for PBXNativeTarget "C_ALL_With_Avoidance" */;
 			buildPhases = (
-				08FB411F2CEC30BD006923B8 /* Sources */,
-				08FB41202CEC30BD006923B8 /* Frameworks */,
-				08FB41212CEC30BD006923B8 /* Resources */,
+				08ECB3592D0A0C6900C8008D /* Sources */,
+				08ECB35A2D0A0C6900C8008D /* Frameworks */,
+				08ECB35B2D0A0C6900C8008D /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				08FB41252CEC30BD006923B8 /* C_ALL_With_Path */,
+				08ECB35F2D0A0C6900C8008D /* C_ALL_With_Avoidance */,
 			);
-			name = C_ALL_With_Path;
+			name = C_ALL_With_Avoidance;
 			packageProductDependencies = (
 			);
-			productName = C_ALL_With_Path;
-			productReference = 08FB41232CEC30BD006923B8 /* C_ALL_With_Path.app */;
+			productName = C_ALL_With_Avoidance;
+			productReference = 08ECB35D2D0A0C6900C8008D /* C_ALL_With_Avoidance.app */;
 			productType = "com.apple.product-type.application";
 		};
-		08FB41342CEC30C2006923B8 /* C_ALL_With_PathTests */ = {
+		08ECB36E2D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 08FB414C2CEC30C2006923B8 /* Build configuration list for PBXNativeTarget "C_ALL_With_PathTests" */;
+			buildConfigurationList = 08ECB3862D0A0C6C00C8008D /* Build configuration list for PBXNativeTarget "C_ALL_With_AvoidanceTests" */;
 			buildPhases = (
-				08FB41312CEC30C2006923B8 /* Sources */,
-				08FB41322CEC30C2006923B8 /* Frameworks */,
-				08FB41332CEC30C2006923B8 /* Resources */,
+				08ECB36B2D0A0C6C00C8008D /* Sources */,
+				08ECB36C2D0A0C6C00C8008D /* Frameworks */,
+				08ECB36D2D0A0C6C00C8008D /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				08FB41372CEC30C2006923B8 /* PBXTargetDependency */,
+				08ECB3712D0A0C6C00C8008D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				08FB41382CEC30C2006923B8 /* C_ALL_With_PathTests */,
+				08ECB3722D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests */,
 			);
-			name = C_ALL_With_PathTests;
+			name = C_ALL_With_AvoidanceTests;
 			packageProductDependencies = (
 			);
-			productName = C_ALL_With_PathTests;
-			productReference = 08FB41352CEC30C2006923B8 /* C_ALL_With_PathTests.xctest */;
+			productName = C_ALL_With_AvoidanceTests;
+			productReference = 08ECB36F2D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		08FB413E2CEC30C2006923B8 /* C_ALL_With_PathUITests */ = {
+		08ECB3782D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 08FB414F2CEC30C2006923B8 /* Build configuration list for PBXNativeTarget "C_ALL_With_PathUITests" */;
+			buildConfigurationList = 08ECB3892D0A0C6C00C8008D /* Build configuration list for PBXNativeTarget "C_ALL_With_AvoidanceUITests" */;
 			buildPhases = (
-				08FB413B2CEC30C2006923B8 /* Sources */,
-				08FB413C2CEC30C2006923B8 /* Frameworks */,
-				08FB413D2CEC30C2006923B8 /* Resources */,
+				08ECB3752D0A0C6C00C8008D /* Sources */,
+				08ECB3762D0A0C6C00C8008D /* Frameworks */,
+				08ECB3772D0A0C6C00C8008D /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				08FB41412CEC30C2006923B8 /* PBXTargetDependency */,
+				08ECB37B2D0A0C6C00C8008D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				08FB41422CEC30C2006923B8 /* C_ALL_With_PathUITests */,
+				08ECB37C2D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests */,
 			);
-			name = C_ALL_With_PathUITests;
+			name = C_ALL_With_AvoidanceUITests;
 			packageProductDependencies = (
 			);
-			productName = C_ALL_With_PathUITests;
-			productReference = 08FB413F2CEC30C2006923B8 /* C_ALL_With_PathUITests.xctest */;
+			productName = C_ALL_With_AvoidanceUITests;
+			productReference = 08ECB3792D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		08FB411B2CEC30BD006923B8 /* Project object */ = {
+		08ECB3552D0A0C6900C8008D /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1610;
 				LastUpgradeCheck = 1610;
 				TargetAttributes = {
-					08FB41222CEC30BD006923B8 = {
+					08ECB35C2D0A0C6900C8008D = {
 						CreatedOnToolsVersion = 16.1;
 					};
-					08FB41342CEC30C2006923B8 = {
+					08ECB36E2D0A0C6C00C8008D = {
 						CreatedOnToolsVersion = 16.1;
-						TestTargetID = 08FB41222CEC30BD006923B8;
+						TestTargetID = 08ECB35C2D0A0C6900C8008D;
 					};
-					08FB413E2CEC30C2006923B8 = {
+					08ECB3782D0A0C6C00C8008D = {
 						CreatedOnToolsVersion = 16.1;
-						TestTargetID = 08FB41222CEC30BD006923B8;
+						TestTargetID = 08ECB35C2D0A0C6900C8008D;
 					};
 				};
 			};
-			buildConfigurationList = 08FB411E2CEC30BD006923B8 /* Build configuration list for PBXProject "C_ALL_With_Path" */;
+			buildConfigurationList = 08ECB3582D0A0C6900C8008D /* Build configuration list for PBXProject "C_ALL_With_Avoidance" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = 08FB411A2CEC30BD006923B8;
+			mainGroup = 08ECB3542D0A0C6900C8008D;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 08FB41242CEC30BD006923B8 /* Products */;
+			productRefGroup = 08ECB35E2D0A0C6900C8008D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				08FB41222CEC30BD006923B8 /* C_ALL_With_Path */,
-				08FB41342CEC30C2006923B8 /* C_ALL_With_PathTests */,
-				08FB413E2CEC30C2006923B8 /* C_ALL_With_PathUITests */,
+				08ECB35C2D0A0C6900C8008D /* C_ALL_With_Avoidance */,
+				08ECB36E2D0A0C6C00C8008D /* C_ALL_With_AvoidanceTests */,
+				08ECB3782D0A0C6C00C8008D /* C_ALL_With_AvoidanceUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		08FB41212CEC30BD006923B8 /* Resources */ = {
+		08ECB35B2D0A0C6900C8008D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		08FB41332CEC30C2006923B8 /* Resources */ = {
+		08ECB36D2D0A0C6C00C8008D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		08FB413D2CEC30C2006923B8 /* Resources */ = {
+		08ECB3772D0A0C6C00C8008D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -255,21 +245,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		08FB411F2CEC30BD006923B8 /* Sources */ = {
+		08ECB3592D0A0C6900C8008D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		08FB41312CEC30C2006923B8 /* Sources */ = {
+		08ECB36B2D0A0C6C00C8008D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		08FB413B2CEC30C2006923B8 /* Sources */ = {
+		08ECB3752D0A0C6C00C8008D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -279,20 +269,20 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		08FB41372CEC30C2006923B8 /* PBXTargetDependency */ = {
+		08ECB3712D0A0C6C00C8008D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 08FB41222CEC30BD006923B8 /* C_ALL_With_Path */;
-			targetProxy = 08FB41362CEC30C2006923B8 /* PBXContainerItemProxy */;
+			target = 08ECB35C2D0A0C6900C8008D /* C_ALL_With_Avoidance */;
+			targetProxy = 08ECB3702D0A0C6C00C8008D /* PBXContainerItemProxy */;
 		};
-		08FB41412CEC30C2006923B8 /* PBXTargetDependency */ = {
+		08ECB37B2D0A0C6C00C8008D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 08FB41222CEC30BD006923B8 /* C_ALL_With_Path */;
-			targetProxy = 08FB41402CEC30C2006923B8 /* PBXContainerItemProxy */;
+			target = 08ECB35C2D0A0C6900C8008D /* C_ALL_With_Avoidance */;
+			targetProxy = 08ECB37A2D0A0C6C00C8008D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		08FB41472CEC30C2006923B8 /* Debug */ = {
+		08ECB3812D0A0C6C00C8008D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -355,7 +345,7 @@
 			};
 			name = Debug;
 		};
-		08FB41482CEC30C2006923B8 /* Release */ = {
+		08ECB3822D0A0C6C00C8008D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -411,24 +401,21 @@
 			};
 			name = Release;
 		};
-		08FB414A2CEC30C2006923B8 /* Debug */ = {
+		08ECB3842D0A0C6C00C8008D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"C_ALL_With_Path/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"C_ALL_With_Avoidance/Preview Content\"";
 				DEVELOPMENT_TEAM = KR4RNT2VTB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "C-ALL-With-Path-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "";
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
-				INFOPLIST_KEY_NSCameraUsageDescription = "\"This app requires access to the camera for AR experiences\"";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
-				INFOPLIST_KEY_NSMotionUsageDescription = "This app requires access to motion data to determine device orientation";
+				INFOPLIST_KEY_NSCameraUsageDescription = "";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "";
+				INFOPLIST_KEY_NSMotionUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -440,7 +427,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-Path";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-Avoidance";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -448,24 +435,21 @@
 			};
 			name = Debug;
 		};
-		08FB414B2CEC30C2006923B8 /* Release */ = {
+		08ECB3852D0A0C6C00C8008D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"C_ALL_With_Path/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"C_ALL_With_Avoidance/Preview Content\"";
 				DEVELOPMENT_TEAM = KR4RNT2VTB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "C-ALL-With-Path-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "";
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
-				INFOPLIST_KEY_NSCameraUsageDescription = "\"This app requires access to the camera for AR experiences\"";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
-				INFOPLIST_KEY_NSMotionUsageDescription = "This app requires access to motion data to determine device orientation";
+				INFOPLIST_KEY_NSCameraUsageDescription = "";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "";
+				INFOPLIST_KEY_NSMotionUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -477,7 +461,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-Path";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-Avoidance";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -485,7 +469,7 @@
 			};
 			name = Release;
 		};
-		08FB414D2CEC30C2006923B8 /* Debug */ = {
+		08ECB3872D0A0C6C00C8008D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -495,16 +479,16 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-PathTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-AvoidanceTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/C_ALL_With_Path.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/C_ALL_With_Path";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/C_ALL_With_Avoidance.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/C_ALL_With_Avoidance";
 			};
 			name = Debug;
 		};
-		08FB414E2CEC30C2006923B8 /* Release */ = {
+		08ECB3882D0A0C6C00C8008D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -514,16 +498,16 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-PathTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-AvoidanceTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/C_ALL_With_Path.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/C_ALL_With_Path";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/C_ALL_With_Avoidance.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/C_ALL_With_Avoidance";
 			};
 			name = Release;
 		};
-		08FB41502CEC30C2006923B8 /* Debug */ = {
+		08ECB38A2D0A0C6C00C8008D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -531,16 +515,16 @@
 				DEVELOPMENT_TEAM = KR4RNT2VTB;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-PathUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-AvoidanceUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = C_ALL_With_Path;
+				TEST_TARGET_NAME = C_ALL_With_Avoidance;
 			};
 			name = Debug;
 		};
-		08FB41512CEC30C2006923B8 /* Release */ = {
+		08ECB38B2D0A0C6C00C8008D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -548,55 +532,55 @@
 				DEVELOPMENT_TEAM = KR4RNT2VTB;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-PathUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.original.C-ALL-With-AvoidanceUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = C_ALL_With_Path;
+				TEST_TARGET_NAME = C_ALL_With_Avoidance;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		08FB411E2CEC30BD006923B8 /* Build configuration list for PBXProject "C_ALL_With_Path" */ = {
+		08ECB3582D0A0C6900C8008D /* Build configuration list for PBXProject "C_ALL_With_Avoidance" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				08FB41472CEC30C2006923B8 /* Debug */,
-				08FB41482CEC30C2006923B8 /* Release */,
+				08ECB3812D0A0C6C00C8008D /* Debug */,
+				08ECB3822D0A0C6C00C8008D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		08FB41492CEC30C2006923B8 /* Build configuration list for PBXNativeTarget "C_ALL_With_Path" */ = {
+		08ECB3832D0A0C6C00C8008D /* Build configuration list for PBXNativeTarget "C_ALL_With_Avoidance" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				08FB414A2CEC30C2006923B8 /* Debug */,
-				08FB414B2CEC30C2006923B8 /* Release */,
+				08ECB3842D0A0C6C00C8008D /* Debug */,
+				08ECB3852D0A0C6C00C8008D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		08FB414C2CEC30C2006923B8 /* Build configuration list for PBXNativeTarget "C_ALL_With_PathTests" */ = {
+		08ECB3862D0A0C6C00C8008D /* Build configuration list for PBXNativeTarget "C_ALL_With_AvoidanceTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				08FB414D2CEC30C2006923B8 /* Debug */,
-				08FB414E2CEC30C2006923B8 /* Release */,
+				08ECB3872D0A0C6C00C8008D /* Debug */,
+				08ECB3882D0A0C6C00C8008D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		08FB414F2CEC30C2006923B8 /* Build configuration list for PBXNativeTarget "C_ALL_With_PathUITests" */ = {
+		08ECB3892D0A0C6C00C8008D /* Build configuration list for PBXNativeTarget "C_ALL_With_AvoidanceUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				08FB41502CEC30C2006923B8 /* Debug */,
-				08FB41512CEC30C2006923B8 /* Release */,
+				08ECB38A2D0A0C6C00C8008D /* Debug */,
+				08ECB38B2D0A0C6C00C8008D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 08FB411B2CEC30BD006923B8 /* Project object */;
+	rootObject = 08ECB3552D0A0C6900C8008D /* Project object */;
 }
