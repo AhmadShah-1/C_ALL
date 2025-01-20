@@ -426,6 +426,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSCameraUsageDescription = "\"This app requires access to the camera for AR experiences\"";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
 				INFOPLIST_KEY_NSMotionUsageDescription = "This app requires access to motion data to determine device orientation";
@@ -463,6 +464,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSCameraUsageDescription = "\"This app requires access to the camera for AR experiences\"";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app requires access to your location to provide navigation features";
 				INFOPLIST_KEY_NSMotionUsageDescription = "This app requires access to motion data to determine device orientation";

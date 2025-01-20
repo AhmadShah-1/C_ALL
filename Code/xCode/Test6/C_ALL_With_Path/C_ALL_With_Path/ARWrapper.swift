@@ -1,148 +1,145 @@
 import SwiftUI
-import RealityKit
 import ARKit
+import RealityKit
 import CoreLocation
 
 struct ARWrapper: UIViewRepresentable {
     @Binding var routeCoordinates: [CLLocationCoordinate2D]
 
-    let arView = ARView(frame: .zero)
+    // MARK: - UIViewRepresentable
+
+    func makeCoordinator() -> Coordinator {
+        return Coordinator()
+    }
 
     func makeUIView(context: Context) -> ARView {
-        print("Setting up ARView...")
+        let arView = ARView(frame: .zero)
 
-        // Check if ARWorldTrackingConfiguration is supported
-        guard ARWorldTrackingConfiguration.isSupported else {
-            print("ARWorldTrackingConfiguration not supported on this device.")
+        // Check ARGeoTracking availability
+        guard ARGeoTrackingConfiguration.isSupported else {
+            print("ARGeoTracking is NOT supported on this device.")
             return arView
         }
 
-        // Set up the AR session configuration
-        let configuration = ARWorldTrackingConfiguration()
-        configuration.environmentTexturing = .automatic
-        configuration.planeDetection = [.horizontal, .vertical]
-        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
-            configuration.sceneReconstruction = .meshWithClassification
-        }
-        
-        // Optionally enable people occlusion if supported
-        if ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
-            configuration.frameSemantics.insert(.personSegmentationWithDepth)
+        // Optionally, check region coverage:
+        ARGeoTrackingConfiguration.checkAvailability { (available, error) in
+            if let error = error {
+                print("GeoTracking availability check error: \(error.localizedDescription)")
+            }
+            if !available {
+                print("GeoTracking not available in this region, or not enough map data.")
+            } else {
+                print("GeoTracking is available in this region!")
+            }
         }
 
-        // Run the session with the configuration
-        arView.session.run(configuration)
-        print("ARSession started.")
+        let config = ARGeoTrackingConfiguration()
+        config.environmentTexturing = .automatic
 
-        // Set the session delegate
+        // If device can do mesh + classification
+        if ARGeoTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
+            config.sceneReconstruction = .meshWithClassification
+        }
+
+        // Start AR session
+        arView.session.run(config)
         arView.session.delegate = context.coordinator
-
-        // Place a simple test box at the start to confirm rendering
-        let boxAnchor = AnchorEntity(world: [0, 0, -0.5])
-        let box = ModelEntity(mesh: .generateBox(size: 0.1),
-                              materials: [SimpleMaterial(color: .red, isMetallic: false)])
-        boxAnchor.addChild(box)
-        arView.scene.addAnchor(boxAnchor)
-        print("Added a test box to the scene as a reference.")
+        print("ARGeoTracking session started.")
 
         return arView
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {
-        print("ARWrapper.updateUIView called. Route count: \(routeCoordinates.count)")
-        // Update route spheres whenever routeCoordinates change
-        context.coordinator.updateRoute(routeCoordinates: routeCoordinates)
+        context.coordinator.updateRoute(uiView, routeCoordinates)
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(arView: arView)
-    }
+    // MARK: - Coordinator
 
     class Coordinator: NSObject, ARSessionDelegate {
-        var arView: ARView
-        var lastPathAnchors: [AnchorEntity] = []
+        // We'll keep references to placed anchors
+        private var geoAnchors = [ARAnchor]()
 
-        init(arView: ARView) {
-            self.arView = arView
-            super.init()
-        }
-
-        // ARSessionDelegate methods
-
+        // Called when AR session fails
         func session(_ session: ARSession, didFailWithError error: Error) {
-            print("ARSession failed with error: \(error.localizedDescription)")
+            print("ARSession error: \(error.localizedDescription)")
         }
 
-        func sessionWasInterrupted(_ session: ARSession) {
-            print("ARSession was interrupted. The session will pause until the interruption ends.")
-        }
-
-        func sessionInterruptionEnded(_ session: ARSession) {
-            print("ARSession interruption ended. Resetting tracking if needed.")
-            // Optionally: session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-        }
-
+        // We can track camera updates, if needed
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            // Handle frame updates if needed
+            // e.g., handle debugging or camera pose
         }
 
-        func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
-            switch camera.trackingState {
-            case .notAvailable:
-                print("Camera tracking not available.")
-            case .limited(let reason):
-                print("Camera tracking limited: \(reason).")
-            case .normal:
-                // Good tracking
-                break
+        // Called when new anchors are added
+        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            for anchor in anchors {
+                if let geoAnchor = anchor as? ARGeoAnchor {
+                    print("ARGeoAnchor added, lat:\(geoAnchor.coordinate.latitude), lon:\(geoAnchor.coordinate.longitude)")
+                }
             }
         }
 
-        // Custom method to update route in AR
-        func updateRoute(routeCoordinates: [CLLocationCoordinate2D]) {
-            guard !routeCoordinates.isEmpty else {
-                print("No route coordinates to update")
+        // Called when anchors are updated (important for geo anchors)
+        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            guard let arView = session.delegate as? ARView else { return }
+
+            for anchor in anchors {
+                // If it's a geo anchor, check if it's localized yet
+                if let geoAnchor = anchor as? ARGeoAnchor {
+                    switch geoAnchor.trackingState {
+                    case .localized:
+                        // If we haven't already added a visible entity:
+                        if !arView.scene.anchors.contains(where: { entityAnchor in
+                            guard let anchorEntity = entityAnchor as? AnchorEntity else { return false }
+                            return anchorEntity.name == anchor.identifier.uuidString
+                        }) {
+                            // Attach a sphere anchor at geoAnchor's transform
+                            print("GeoAnchor localized, placing sphere at lat:\(geoAnchor.coordinate.latitude), lon:\(geoAnchor.coordinate.longitude)")
+
+                            let sphereAnchor = AnchorEntity(world: geoAnchor.transform)
+                            sphereAnchor.name = anchor.identifier.uuidString
+
+                            let sphere = ModelEntity(
+                                mesh: .generateSphere(radius: 0.15),
+                                materials: [SimpleMaterial(color: .green, roughness: 0.2, isMetallic: false)]
+                            )
+
+                            sphereAnchor.addChild(sphere)
+                            arView.scene.addAnchor(sphereAnchor)
+                        }
+
+                    case .localizing:
+                        print("GeoAnchor is localizing (lat:\(geoAnchor.coordinate.latitude))")
+                    case .notAvailable:
+                        print("GeoAnchor not available.")
+                    @unknown default:
+                        break
+                    }
+                }
+            }
+        }
+
+        // MARK: - Placing GeoAnchors for route coordinates
+
+        func updateRoute(_ arView: ARView, _ coords: [CLLocationCoordinate2D]) {
+            guard !coords.isEmpty else {
+                print("No route coords to place.")
                 return
             }
 
-            // Remove old anchors
-            for anchor in lastPathAnchors {
-                arView.scene.removeAnchor(anchor)
+            // Remove old geo anchors from the session
+            for anchor in geoAnchors {
+                arView.session.remove(anchor: anchor)
             }
-            lastPathAnchors.removeAll()
+            geoAnchors.removeAll()
 
-            print("Coordinator.updateRoute called with \(routeCoordinates.count) coords.")
-            print("Placing route spheres now...")
+            print("Placing ARGeoAnchor for each route coord: \(coords.count) points")
 
-            guard let frame = arView.session.currentFrame else {
-                print("No current ARFrame available. Cannot place route spheres.")
-                return
+            // Create ARGeoAnchor for each route coordinate
+            for c in coords {
+                let anchor = ARGeoAnchor(coordinate: c)
+                geoAnchors.append(anchor)
+                arView.session.add(anchor: anchor)
             }
-            let cameraPosition = frame.camera.transform.translation
-
-            // For demonstration, place spheres in a line in front of the camera.
-            // In a real scenario, you'd convert these coordinates into AR world positions
-            // based on user location and heading.
-            for (index, _) in routeCoordinates.enumerated() {
-                let offset = Float(index) * 0.5 // spheres half a meter apart
-                let position = SIMD3<Float>(cameraPosition.x, cameraPosition.y, cameraPosition.z - offset)
-                let anchor = AnchorEntity(world: position)
-
-                let material = SimpleMaterial(color: .green, isMetallic: false)
-                let sphere = ModelEntity(mesh: .generateSphere(radius: 0.05), materials: [material])
-                anchor.addChild(sphere)
-                arView.scene.addAnchor(anchor)
-                lastPathAnchors.append(anchor)
-            }
-
-            print("Route spheres placed.")
         }
-    }
-}
-
-// Helper to extract translation from a simd_float4x4 matrix
-extension simd_float4x4 {
-    var translation: SIMD3<Float> {
-        SIMD3<Float>(columns.3.x, columns.3.y, columns.3.z)
     }
 }

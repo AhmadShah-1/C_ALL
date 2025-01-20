@@ -8,6 +8,7 @@ class LocationManager: NSObject, ObservableObject {
     override init() {
         super.init()
         manager.delegate = self
+        // High accuracy for walking navigation
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
     }
 
@@ -23,18 +24,24 @@ class LocationManager: NSObject, ObservableObject {
     }
 }
 
+// MARK: - CLLocationManagerDelegate
+
 extension LocationManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        print("LocationManager auth changed: \(status.rawValue)")
-        if status == .authorizedWhenInUse || status == .authorizedAlways {
+        print("Location authorization changed: \(status.rawValue)")
+        switch status {
+        case .authorizedWhenInUse, .authorizedAlways:
             manager.startUpdatingLocation()
+        default:
+            break
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         DispatchQueue.main.async {
-            self.location = locations.last
-            print("LocationManager updated location to \(String(describing: self.location?.coordinate))")
+            guard let location = locations.last else { return }
+            self.location = location
+            print("Location updated to \(location.coordinate)")
         }
     }
 
