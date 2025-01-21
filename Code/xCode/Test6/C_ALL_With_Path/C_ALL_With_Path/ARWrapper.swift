@@ -121,8 +121,8 @@ struct ARWrapper: UIViewRepresentable {
             for coord in newCoordinates {
                 let idString = "\(coord.latitude),\(coord.longitude)"
                 if !placedCoords.contains(idString) {
-                    // Use user altitude if available, else 0.0.
-                    let alt = parent.userLocation?.altitude ?? 12.0
+                    // Use user altitude if available, else 11.0.
+                    let alt = parent.userLocation?.altitude ?? 11.0
                     print("[ARWrapper.Coordinator] Placing ARGeoAnchor lat=\(coord.latitude), lon=\(coord.longitude), alt=\(alt)")
                     let anchor = ARGeoAnchor(coordinate: coord, altitude: alt)
                     session.add(anchor: anchor)
