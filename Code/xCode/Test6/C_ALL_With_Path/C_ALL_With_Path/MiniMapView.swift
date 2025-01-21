@@ -4,7 +4,7 @@ import MapKit
 struct MiniMapView: UIViewRepresentable {
     let routeCoordinates: [CLLocationCoordinate2D]
     let userLocation: CLLocation?
-
+    
     func makeUIView(context: Context) -> MKMapView {
         let mapView = MKMapView()
         mapView.isZoomEnabled = false
@@ -13,34 +13,35 @@ struct MiniMapView: UIViewRepresentable {
         mapView.delegate = context.coordinator
         return mapView
     }
-
+    
     func updateUIView(_ uiView: MKMapView, context: Context) {
         uiView.removeOverlays(uiView.overlays)
-
-        // If route is available, show it
+        
         if !routeCoordinates.isEmpty {
             let polyline = MKPolyline(coordinates: routeCoordinates, count: routeCoordinates.count)
             uiView.addOverlay(polyline)
-
-            // Zoom to fit route + user location if known
+            
+            // Fit route + user location if available
             if let userLoc = userLocation {
                 let allCoords = routeCoordinates + [userLoc.coordinate]
                 let bounding = MKPolyline(coordinates: allCoords, count: allCoords.count).boundingMapRect
-                uiView.setVisibleMapRect(bounding, edgePadding: UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8), animated: false)
+                uiView.setVisibleMapRect(bounding, edgePadding: .init(top: 8, left: 8, bottom: 8, right: 8), animated: false)
             }
         } else {
-            // Otherwise just center user location
+            // Just center user location
             if let userLoc = userLocation {
-                let region = MKCoordinateRegion(center: userLoc.coordinate, latitudinalMeters: 200, longitudinalMeters: 200)
+                let region = MKCoordinateRegion(center: userLoc.coordinate,
+                                                latitudinalMeters: 200,
+                                                longitudinalMeters: 200)
                 uiView.setRegion(region, animated: false)
             }
         }
     }
-
+    
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
-
+    
     class Coordinator: NSObject, MKMapViewDelegate {
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let polyline = overlay as? MKPolyline {

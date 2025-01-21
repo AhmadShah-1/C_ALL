@@ -3,143 +3,198 @@ import ARKit
 import RealityKit
 import CoreLocation
 
+/// Makes CLLocationCoordinate2D Equatable so we can do `if coords != currentRoute`.
+// Optional: comment out or remove if you don't need to compare coordinates.
+// extension CLLocationCoordinate2D: Equatable {
+//     public static funce == (lhs: CLLocationCoordinate2D, rhs: CLLocationCoordinate2D) -> Bool {
+//         return lhs.latitude == rhs.latitude && lhs.longitude == rhs.longitude
+//     }
+// }
+
+/// Exclusively uses ARGeoTrackingConfiguration (no fallback).
+///s Places ARGeoAnchor for each route coordinate once the session localizes.
+/// Setss isGeoLocalized=true/false to show "ARGeo has localized!" in ContentView.
 struct ARWrapper: UIViewRepresentable {
+    /// The route from e.g. MKDirections (lat/lon waypoints).
     @Binding var routeCoordinates: [CLLocationCoordinate2D]
-
-    // MARK: - UIViewRepresentable
-
+    /// The user’s current location (if altitude needed).
+    @Binding var userLocation: CLLocation?
+    /// Whether ARKit’s geotracking is localized (for UI display).
+    @Binding var isGeoLocalized: Bool
+    
     func makeCoordinator() -> Coordinator {
-        return Coordinator()
+        Coordinator(self)
     }
-
+    
     func makeUIView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
-
-        // Check ARGeoTracking availability
-        guard ARGeoTrackingConfiguration.isSupported else {
-            print("ARGeoTracking is NOT supported on this device.")
-            return arView
-        }
-
-        // Optionally, check region coverage:
-        ARGeoTrackingConfiguration.checkAvailability { (available, error) in
-            if let error = error {
-                print("GeoTracking availability check error: \(error.localizedDescription)")
-            }
-            if !available {
-                print("GeoTracking not available in this region, or not enough map data.")
-            } else {
-                print("GeoTracking is available in this region!")
-            }
-        }
-
-        let config = ARGeoTrackingConfiguration()
-        config.environmentTexturing = .automatic
-
-        // If device can do mesh + classification
-        if ARGeoTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
-            config.sceneReconstruction = .meshWithClassification
-        }
-
-        // Start AR session
-        arView.session.run(config)
+        context.coordinator.arView = arView
+        
+        // Debug info (feature points, origin).
+        arView.debugOptions = [.showFeaturePoints, .showWorldOrigin]
+        
+        // Start ARGeoTracking (no fallback).
+        startGeoTracking(in: arView, coordinator: context.coordinator)
+        
+        // Session delegate.
         arView.session.delegate = context.coordinator
-        print("ARGeoTracking session started.")
-
+        
+        // iOS 15+ => optional geoTracking coaching overlay.
+        if #available(iOS 15.0, *) {
+            let coachingOverlay = ARCoachingOverlayView()
+            coachingOverlay.session = arView.session
+            coachingOverlay.delegate = context.coordinator
+            coachingOverlay.goal = .geoTracking
+            coachingOverlay.translatesAutoresizingMaskIntoConstraints = false
+            arView.addSubview(coachingOverlay)
+            NSLayoutConstraint.activate([
+                coachingOverlay.centerXAnchor.constraint(equalTo: arView.centerXAnchor),
+                coachingOverlay.centerYAnchor.constraint(equalTo: arView.centerYAnchor),
+                coachingOverlay.widthAnchor.constraint(equalTo: arView.widthAnchor),
+                coachingOverlay.heightAnchor.constraint(equalTo: arView.heightAnchor)
+            ])
+        }
+        
         return arView
     }
-
+    
     func updateUIView(_ uiView: ARView, context: Context) {
-        context.coordinator.updateRoute(uiView, routeCoordinates)
+        // Called whenever routeCoordinates changes.
+        context.coordinator.updateRoute(routeCoordinates)
     }
-
+    
+    // MARK: - Private
+    
+    private func startGeoTracking(in arView: ARView, coordinator: Coordinator) {
+        guard #available(iOS 14.0, *) else {
+            print("[ARWrapper] iOS 14+ required for ARGeoTracking.")
+            return
+        }
+        
+        let config = ARGeoTrackingConfiguration()
+        config.environmentTexturing = .automatic
+        
+        print("[ARWrapper] Checking ARGeoTracking availability.")
+        ARGeoTrackingConfiguration.checkAvailability { available, error in
+            if let e = error {
+                print("[ARWrapper] ARGeoTracking check error => \(e.localizedDescription)")
+            }
+            if available {
+                print("[ARWrapper] ARGeoTracking is available. Running session...")
+                arView.session.run(config)
+                coordinator.isGeoTrackingActive = true
+            } else {
+                print("[ARWrapper] ARGeoTracking not available => handle differently.")
+            }
+        }
+    }
+    
     // MARK: - Coordinator
-
+    
     class Coordinator: NSObject, ARSessionDelegate {
-        // We'll keep references to placed anchors
-        private var geoAnchors = [ARAnchor]()
-
-        // Called when AR session fails
-        func session(_ session: ARSession, didFailWithError error: Error) {
-            print("ARSession error: \(error.localizedDescription)")
+        let parent: ARWrapper
+        weak var arView: ARView?
+        
+        /// True once ARGeoTracking config has started.
+        var isGeoTrackingActive = false
+        
+        /// Track placed anchors by lat/lon string.
+        private var placedCoords: Set<String> = []
+        
+        init(_ parent: ARWrapper) {
+            self.parent = parent
         }
-
-        // We can track camera updates, if needed
-        func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            // e.g., handle debugging or camera pose
-        }
-
-        // Called when new anchors are added
-        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-            for anchor in anchors {
-                if let geoAnchor = anchor as? ARGeoAnchor {
-                    print("ARGeoAnchor added, lat:\(geoAnchor.coordinate.latitude), lon:\(geoAnchor.coordinate.longitude)")
-                }
-            }
-        }
-
-        // Called when anchors are updated (important for geo anchors)
-        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-            guard let arView = session.delegate as? ARView else { return }
-
-            for anchor in anchors {
-                // If it's a geo anchor, check if it's localized yet
-                if let geoAnchor = anchor as? ARGeoAnchor {
-                    switch geoAnchor.trackingState {
-                    case .localized:
-                        // If we haven't already added a visible entity:
-                        if !arView.scene.anchors.contains(where: { entityAnchor in
-                            guard let anchorEntity = entityAnchor as? AnchorEntity else { return false }
-                            return anchorEntity.name == anchor.identifier.uuidString
-                        }) {
-                            // Attach a sphere anchor at geoAnchor's transform
-                            print("GeoAnchor localized, placing sphere at lat:\(geoAnchor.coordinate.latitude), lon:\(geoAnchor.coordinate.longitude)")
-
-                            let sphereAnchor = AnchorEntity(world: geoAnchor.transform)
-                            sphereAnchor.name = anchor.identifier.uuidString
-
-                            let sphere = ModelEntity(
-                                mesh: .generateSphere(radius: 0.15),
-                                materials: [SimpleMaterial(color: .green, roughness: 0.2, isMetallic: false)]
-                            )
-
-                            sphereAnchor.addChild(sphere)
-                            arView.scene.addAnchor(sphereAnchor)
-                        }
-
-                    case .localizing:
-                        print("GeoAnchor is localizing (lat:\(geoAnchor.coordinate.latitude))")
-                    case .notAvailable:
-                        print("GeoAnchor not available.")
-                    @unknown default:
-                        break
-                    }
-                }
-            }
-        }
-
-        // MARK: - Placing GeoAnchors for route coordinates
-
-        func updateRoute(_ arView: ARView, _ coords: [CLLocationCoordinate2D]) {
-            guard !coords.isEmpty else {
-                print("No route coords to place.")
+        
+        /// Places ARGeoAnchors for new route points if AR geoTracking is active.
+        func updateRoute(_ newCoordinates: [CLLocationCoordinate2D]) {
+            guard isGeoTrackingActive, let session = arView?.session else {
+                print("[ARWrapper.Coordinator] ARGeoTracking not active yet. Cannot place anchors.")
                 return
             }
-
-            // Remove old geo anchors from the session
-            for anchor in geoAnchors {
-                arView.session.remove(anchor: anchor)
+            
+            // Optional: print the entire routeCoordinates in bold/cyan for clarity.
+            let ansiBoldCyan = "\u{001B}[1;36m"
+            let ansiReset = "\u{001B}[0m"
+            print("[ARWrapper.Coordinator] \(ansiBoldCyan)Full routeCoordinates:\n\(newCoordinates)\(ansiReset)")
+            
+            // For each coordinate, if not placed, add an ARGeoAnchor.
+            for coord in newCoordinates {
+                let idString = "\(coord.latitude),\(coord.longitude)"
+                if !placedCoords.contains(idString) {
+                    // Use user altitude if available, else 0.0.
+                    let alt = parent.userLocation?.altitude ?? 12.0
+                    print("[ARWrapper.Coordinator] Placing ARGeoAnchor lat=\(coord.latitude), lon=\(coord.longitude), alt=\(alt)")
+                    let anchor = ARGeoAnchor(coordinate: coord, altitude: alt)
+                    session.add(anchor: anchor)
+                    placedCoords.insert(idString)
+                }
             }
-            geoAnchors.removeAll()
-
-            print("Placing ARGeoAnchor for each route coord: \(coords.count) points")
-
-            // Create ARGeoAnchor for each route coordinate
-            for c in coords {
-                let anchor = ARGeoAnchor(coordinate: c)
-                geoAnchors.append(anchor)
-                arView.session.add(anchor: anchor)
+        }
+        
+        // MARK: - ARSessionDelegate
+        
+        func session(_ session: ARSession, didUpdate frame: ARFrame) {}
+        
+        func session(_ session: ARSession, didFailWithError error: Error) {
+            print("[ARWrapper.Coordinator] AR session failed => \(error.localizedDescription)")
+        }
+        
+        func sessionWasInterrupted(_ session: ARSession) {
+            print("[ARWrapper.Coordinator] AR session was interrupted.")
+        }
+        
+        func sessionInterruptionEnded(_ session: ARSession) {
+            print("[ARWrapper.Coordinator] AR session interruption ended. Restarting tracking.")
+        }
+        
+        @available(iOS 14.0, *)
+        func session(_ session: ARSession, didChange geoTrackingStatus: ARGeoTrackingStatus) {
+            switch geoTrackingStatus.state {
+            case .localized:
+                parent.isGeoLocalized = true
+            default:
+                parent.isGeoLocalized = false
             }
+            print("[ARWrapper.Coordinator] geoTrackingStatus => state=\(geoTrackingStatus.state.rawValue), accuracy=\(geoTrackingStatus.accuracy.rawValue)")
+        }
+        
+        // 1) Add session(_:didAdd:) to attach a simple red sphere to each ARGeoAnchor
+        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            for anchor in anchors {
+                guard let arView = arView, anchor is ARGeoAnchor else { continue }
+                
+                // Wrap this ARAnchor in a RealityKit AnchorEntity
+                let anchorEntity = AnchorEntity(anchor: anchor)
+                
+                // Create a small sphere
+                let sphereMesh = MeshResource.generateSphere(radius: 0.2)
+                let material = SimpleMaterial(color: .red, roughness: 0.2, isMetallic: false)
+                let sphereEntity = ModelEntity(mesh: sphereMesh, materials: [material])
+                
+                // Attach sphere and add to ARView's scene
+                anchorEntity.addChild(sphereEntity)
+                arView.scene.addAnchor(anchorEntity)
+            }
+        }
+    }
+}
+
+// MARK: - iOS 15 Coaching Overlay Delegate
+
+@available(iOS 15.0, *)
+extension ARWrapper.Coordinator: ARCoachingOverlayViewDelegate {
+    func coachingOverlayViewWillActivate(_ coachingOverlayView: ARCoachingOverlayView) {
+        print("[ARWrapper.Coordinator] Coaching overlay will activate.")
+    }
+    func coachingOverlayViewDidDeactivate(_ coachingOverlayView: ARCoachingOverlayView) {
+        print("[ARWrapper.Coordinator] Coaching overlay did deactivate.")
+    }
+    func coachingOverlayViewDidRequestSessionReset(_ coachingOverlayView: ARCoachingOverlayView) {
+        print("[ARWrapper.Coordinator] Coaching overlay requested session reset.")
+        guard let view = arView else { return }
+        view.session.pause()
+        if let config = view.session.configuration {
+            view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
         }
     }
 }
