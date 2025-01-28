@@ -14,11 +14,11 @@ struct ContentView: View {
     /// Location manager for user location
     @StateObject private var locationManager = LocationManager()
     
-    /// Optionally toggle to force local AR fallback (not used in this snippet)
-    @State private var forceLocalMode = false
-    
-    /// Matches ARWrapper's third parameter (Binding<Bool>).
+    /// Whether ARKit’s geotracking is localized (for UI display).
     @State private var isGeoLocalized = false
+    
+    /// Example toggle to demonstrate other UI elements
+    @State private var forceLocalMode = false
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -78,54 +78,109 @@ struct ContentView: View {
         .onChange(of: showMap) { oldValue, newValue in
             print("[ContentView] onChange(showMap) old=\(oldValue), new=\(newValue)")
             
-            // If the sheet was dismissed (oldValue=true -> newValue=false)...
+            // If the sheet was just dismissed
             if oldValue && !newValue {
                 if let destination = selectedCoordinate,
                    let userLoc = locationManager.location?.coordinate {
                     
-                    print("[ContentView] Map sheet dismissed, have selected destination lat=\(destination.latitude), lon=\(destination.longitude). Calculating route!")
-                    calculateRoute(from: userLoc, to: destination)
+                    print("[ContentView] Map sheet dismissed, have destination lat=\(destination.latitude), lon=\(destination.longitude). Fetching OSM route!")
+                    
+                    // Instead of Apple’s MKDirections, use OSM foot-walking data:
+                    fetchOSMWalkableRoute(from: userLoc, to: destination) { coords in
+                        guard let coords = coords, !coords.isEmpty else {
+                            print("[ContentView] OSM route fetch returned no coordinates.")
+                            return
+                        }
+                        // Optionally resample them for anchor spacing
+                        let spacedCoords = resampleCoordinates(from: coords, spacingMeters: 5.0)
+                        
+                        // Update the AR route
+                        DispatchQueue.main.async {
+                            self.routeCoordinates = spacedCoords
+                            print("[ContentView] OSM route found \(coords.count) coords; resampled to \(spacedCoords.count).")
+                        }
+                    }
                 } else {
                     print("[ContentView] Map sheet dismissed, but no destination or userLoc missing.")
                 }
             }
         }
     }
+}
+
+// MARK: - OpenRouteService OSM-based "foot-walking" route
+extension ContentView {
     
-    // MARK: - Calculate Route
-    func calculateRoute(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) {
-        print("[ContentView] calculateRoute from lat=\(from.latitude), lon=\(from.longitude) to lat=\(to.latitude), lon=\(to.longitude)")
+    /// Fetch a walking/sidewalk route from OpenRouteService, returning raw coordinates (lon-lat order -> lat-lon).
+    func fetchOSMWalkableRoute(
+        from origin: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D,
+        completion: @escaping ([CLLocationCoordinate2D]?) -> Void
+    ) {
+        // Replace with your real ORS API key
+        let apiKey = "5b3ce3597851110001cf624890ecd5b750e3402a818663b03cbc6f07"
         
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: from))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: to))
-        request.transportType = .walking
+        // ORS wants coordinates as "lon,lat"
+        let urlString = """
+        https://api.openrouteservice.org/v2/directions/foot-walking?api_key=\(apiKey)&start=\(origin.longitude),\(origin.latitude)&end=\(destination.longitude),\(destination.latitude)
+        """
         
-        let directions = MKDirections(request: request)
-        directions.calculate { response, error in
-            if let e = error {
-                print("[ContentView] calculateRoute error: \(e.localizedDescription)")
-                return
-            }
-            guard let route = response?.routes.first else {
-                print("[ContentView] No routes found in directions response.")
-                return
-            }
-            let polyline = route.polyline
-            let rawCoords = polyline.coordinates
-            
-            // ************** NEW: Resample to get ~1 meter spacing **************
-            let spacedCoords = resampleCoordinates(from: rawCoords, spacingMeters: 5.0)
-            
-            // Update the binding used by ARWrapper
-            self.routeCoordinates = spacedCoords
-            
-            print("[ContentView] Route found with \(rawCoords.count) raw coords; resampled to \(spacedCoords.count).")
+        guard let url = URL(string: urlString) else {
+            print("[fetchOSMWalkableRoute] Invalid URL string.")
+            completion(nil)
+            return
         }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            if let e = error {
+                print("[fetchOSMWalkableRoute] error => \(e.localizedDescription)")
+                completion(nil)
+                return
+            }
+            guard let data = data,
+                  let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                print("[fetchOSMWalkableRoute] No data or bad status code.")
+                completion(nil)
+                return
+            }
+            
+            do {
+                let decoded = try JSONDecoder().decode(OpenRouteServiceResponse.self, from: data)
+                guard let feature = decoded.features.first else {
+                    print("[fetchOSMWalkableRoute] No features found in response.")
+                    completion(nil)
+                    return
+                }
+                // Convert [lon, lat] arrays to CLLocationCoordinate2D
+                let routeCoords = feature.geometry.coordinates.map { arr -> CLLocationCoordinate2D in
+                    CLLocationCoordinate2D(latitude: arr[1], longitude: arr[0])
+                }
+                
+                completion(routeCoords)
+            } catch {
+                print("[fetchOSMWalkableRoute] JSON parse error => \(error)")
+                completion(nil)
+            }
+        }.resume()
+    }
+}
+
+// MARK: - ORS Response Models
+struct OpenRouteServiceResponse: Decodable {
+    let features: [Feature]
+    
+    struct Feature: Decodable {
+        let geometry: Geometry
+    }
+    
+    struct Geometry: Decodable {
+        let coordinates: [[Double]] // each [lon, lat]
     }
 }
 
 // MARK: - MKPolyline Helper
+// (No longer used for Apple’s MKDirections, but we can still use if needed for debugging)
 extension MKPolyline {
     var coordinates: [CLLocationCoordinate2D] {
         var result = [CLLocationCoordinate2D](
@@ -137,8 +192,7 @@ extension MKPolyline {
     }
 }
 
-// MARK: - 1-meter spacing utility
-// You can place this here or in a separate file
+// MARK: - (Optional) Resample for consistent anchor spacing
 func resampleCoordinates(
     from coords: [CLLocationCoordinate2D],
     spacingMeters: Double = 1.0
@@ -146,9 +200,9 @@ func resampleCoordinates(
     guard coords.count > 1 else { return coords }
 
     var result: [CLLocationCoordinate2D] = []
-    result.reserveCapacity(coords.count * 10) // Rough guess to reduce re-allocation
+    result.reserveCapacity(coords.count * 10) // just a guess
 
-    // Start with the very first point
+    // Start with the first point
     result.append(coords[0])
     var previousCoord = coords[0]
 
@@ -158,9 +212,8 @@ func resampleCoordinates(
         // Distance between previous and current
         let dist = distanceBetween(previousCoord, currentCoord)
         
-        // If less than spacing, just append current and move on
+        // If less than spacing, skip (or just append final if end)
         guard dist >= spacingMeters else {
-            // If it's the final point in the entire route, ensure we include it
             if i == coords.count - 1 {
                 result.append(currentCoord)
             }
@@ -195,24 +248,18 @@ func resampleCoordinates(
     return result
 }
 
-private func distanceBetween(
-    _ coord1: CLLocationCoordinate2D,
-    _ coord2: CLLocationCoordinate2D
-) -> Double {
-    let loc1 = CLLocation(latitude: coord1.latitude, longitude: coord1.longitude)
-    let loc2 = CLLocation(latitude: coord2.latitude, longitude: coord2.longitude)
+private func distanceBetween(_ c1: CLLocationCoordinate2D, _ c2: CLLocationCoordinate2D) -> Double {
+    let loc1 = CLLocation(latitude: c1.latitude, longitude: c1.longitude)
+    let loc2 = CLLocation(latitude: c2.latitude, longitude: c2.longitude)
     return loc1.distance(from: loc2)
 }
 
-/// Bearing in degrees from coord1 to coord2 (0 = north, 90 = east, etc.)
-private func bearingBetween(
-    _ coord1: CLLocationCoordinate2D,
-    _ coord2: CLLocationCoordinate2D
-) -> Double {
-    let lat1 = degreesToRadians(coord1.latitude)
-    let lon1 = degreesToRadians(coord1.longitude)
-    let lat2 = degreesToRadians(coord2.latitude)
-    let lon2 = degreesToRadians(coord2.longitude)
+/// Bearing in degrees from c1 to c2 (0 = north, 90 = east, etc.)
+private func bearingBetween(_ c1: CLLocationCoordinate2D, _ c2: CLLocationCoordinate2D) -> Double {
+    let lat1 = degreesToRadians(c1.latitude)
+    let lon1 = degreesToRadians(c1.longitude)
+    let lat2 = degreesToRadians(c2.latitude)
+    let lon2 = degreesToRadians(c2.longitude)
     let dLon = lon2 - lon1
     
     let y = sin(dLon) * cos(lat2)
@@ -222,7 +269,7 @@ private func bearingBetween(
     return radiansToDegrees(radBearing).normalizedHeading()
 }
 
-/// Returns a new coordinate by moving `distanceMeters` toward `bearingDegrees` from `coord`.
+/// Returns a new coordinate by moving `distanceMeters` on a given bearing from `coord`.
 private func coordinate(
     from coord: CLLocationCoordinate2D,
     distanceMeters: Double,
@@ -235,8 +282,10 @@ private func coordinate(
     
     let lat2 = asin(sin(lat1) * cos(distanceMeters / radiusEarth)
                     + cos(lat1) * sin(distanceMeters / radiusEarth) * cos(bearingRad))
-    let lon2 = lon1 + atan2(sin(bearingRad) * sin(distanceMeters / radiusEarth) * cos(lat1),
-                            cos(distanceMeters / radiusEarth) - sin(lat1) * sin(lat2))
+    let lon2 = lon1 + atan2(
+        sin(bearingRad) * sin(distanceMeters / radiusEarth) * cos(lat1),
+        cos(distanceMeters / radiusEarth) - sin(lat1) * sin(lat2)
+    )
     
     return CLLocationCoordinate2D(
         latitude: radiansToDegrees(lat2),
@@ -244,16 +293,15 @@ private func coordinate(
     )
 }
 
-// Degree/radian conversions
-private func degreesToRadians(_ degrees: Double) -> Double {
-    degrees * .pi / 180.0
+// Utility
+private func degreesToRadians(_ deg: Double) -> Double {
+    deg * .pi / 180.0
 }
-private func radiansToDegrees(_ radians: Double) -> Double {
-    radians * 180.0 / .pi
+private func radiansToDegrees(_ rad: Double) -> Double {
+    rad * 180.0 / .pi
 }
-
 private extension Double {
-    /// Normalize any heading angle into [0, 360).
+    /// Normalize heading into [0, 360)
     func normalizedHeading() -> Double {
         let mod = fmod(self, 360.0)
         return mod < 0 ? mod + 360.0 : mod

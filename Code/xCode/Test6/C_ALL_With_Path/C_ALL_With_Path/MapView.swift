@@ -59,6 +59,7 @@ struct MapView: UIViewRepresentable {
         
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
             guard let mapView = gesture.view as? MKMapView else { return }
+            
             if gesture.state == .began {
                 let point = gesture.location(in: mapView)
                 let coord = mapView.convert(point, toCoordinateFrom: mapView)
@@ -74,7 +75,7 @@ struct MapView: UIViewRepresentable {
                 parent.selectedCoordinate = coord
                 print("[MapView] Picked coord lat=\(coord.latitude), lon=\(coord.longitude). Dismissing sheet.")
                 
-                // Dismiss sheet
+                // Dismiss the map sheet
                 parent.isPresented = false
             }
         }

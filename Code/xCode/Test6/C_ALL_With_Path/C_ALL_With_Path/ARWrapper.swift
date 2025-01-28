@@ -3,19 +3,11 @@ import ARKit
 import RealityKit
 import CoreLocation
 
-/// Makes CLLocationCoordinate2D Equatable so we can do `if coords != currentRoute`.
-// Optional: comment out or remove if you don't need to compare coordinates.
-// extension CLLocationCoordinate2D: Equatable {
-//     public static funce == (lhs: CLLocationCoordinate2D, rhs: CLLocationCoordinate2D) -> Bool {
-//         return lhs.latitude == rhs.latitude && lhs.longitude == rhs.longitude
-//     }
-// }
-
 /// Exclusively uses ARGeoTrackingConfiguration (no fallback).
-///s Places ARGeoAnchor for each route coordinate once the session localizes.
-/// Setss isGeoLocalized=true/false to show "ARGeo has localized!" in ContentView.
+/// Places ARGeoAnchor for each route coordinate once the session localizes.
+/// Sets isGeoLocalized=true/false to show "ARGeo has localized!" in ContentView.
 struct ARWrapper: UIViewRepresentable {
-    /// The route from e.g. MKDirections (lat/lon waypoints).
+    /// The route from e.g. OSM route (lat/lon waypoints).
     @Binding var routeCoordinates: [CLLocationCoordinate2D]
     /// The user’s current location (if altitude needed).
     @Binding var userLocation: CLLocation?
@@ -112,7 +104,6 @@ struct ARWrapper: UIViewRepresentable {
                 return
             }
             
-            // Optional: print the entire routeCoordinates in bold/cyan for clarity.
             let ansiBoldCyan = "\u{001B}[1;36m"
             let ansiReset = "\u{001B}[0m"
             print("[ARWrapper.Coordinator] \(ansiBoldCyan)Full routeCoordinates:\n\(newCoordinates)\(ansiReset)")
@@ -121,7 +112,7 @@ struct ARWrapper: UIViewRepresentable {
             for coord in newCoordinates {
                 let idString = "\(coord.latitude),\(coord.longitude)"
                 if !placedCoords.contains(idString) {
-                    // Use user altitude if available, else 11.0.
+                    // Use user altitude if available, else default to 11.0
                     let alt = parent.userLocation?.altitude ?? 11.0
                     print("[ARWrapper.Coordinator] Placing ARGeoAnchor lat=\(coord.latitude), lon=\(coord.longitude), alt=\(alt)")
                     let anchor = ARGeoAnchor(coordinate: coord, altitude: alt)
@@ -158,7 +149,7 @@ struct ARWrapper: UIViewRepresentable {
             print("[ARWrapper.Coordinator] geoTrackingStatus => state=\(geoTrackingStatus.state.rawValue), accuracy=\(geoTrackingStatus.accuracy.rawValue)")
         }
         
-        // 1) Add session(_:didAdd:) to attach a simple red sphere to each ARGeoAnchor
+        // Attach a simple red sphere to each ARGeoAnchor
         func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
             for anchor in anchors {
                 guard let arView = arView, anchor is ARGeoAnchor else { continue }
@@ -179,7 +170,7 @@ struct ARWrapper: UIViewRepresentable {
     }
 }
 
-// MARK: - iOS 15 Coaching Overlay Delegate
+// MARK: - iOS 15 Coaching Overlay
 
 @available(iOS 15.0, *)
 extension ARWrapper.Coordinator: ARCoachingOverlayViewDelegate {
