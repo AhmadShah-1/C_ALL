@@ -1,12 +1,15 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import CoreBluetooth
 
 struct ContentView: View {
     @State private var showMap = false
+    @State private var showBluetoothSheet = false
     @State private var selectedCoordinate: CLLocationCoordinate2D?
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []
     @StateObject private var locationManager = LocationManager()
+    @EnvironmentObject private var bluetoothService: BluetoothService
     @State private var isGeoLocalized = false
     @State private var forceLocalMode = false
     @State private var currentTargetIndex: Int = 0
@@ -14,6 +17,7 @@ struct ContentView: View {
     @State private var depthImage: UIImage? = nil
     @State private var showDepthOverlay: Bool = false  // Toggle for depth view
     @State private var blinkOpacity: Double = 1.0      // For blinking notification
+    @State private var currentCompassAngle: Double = 0
 
     /// Returns the current target coordinate from the route.
     var nextAnchorCoordinate: CLLocationCoordinate2D? {
@@ -31,6 +35,17 @@ struct ContentView: View {
         var bearing = atan2(y, x) * 180.0 / .pi
         bearing = (bearing + 360).truncatingRemainder(dividingBy: 360)
         return bearing
+    }
+
+    func updateCompassAngle() {
+        guard let userCoord = locationManager.location?.coordinate,
+              let heading = locationManager.heading?.trueHeading,
+              let targetCoord = nextAnchorCoordinate else { return }
+        
+        let bearingToTarget = bearingBetween(userCoord, targetCoord)
+        let relativeAngle = (bearingToTarget - heading) + obstacleOffset
+        currentCompassAngle = relativeAngle
+        bluetoothService.sendCompassAngle(relativeAngle)
     }
 
     var body: some View {
@@ -58,14 +73,20 @@ struct ContentView: View {
             VStack {
                 HStack {
                     // Compass at top left.
-                    if let userCoord = locationManager.location?.coordinate,
-                       let heading = locationManager.heading?.trueHeading,
-                       let targetCoord = nextAnchorCoordinate {
-                        let bearingToTarget = bearingBetween(userCoord, targetCoord)
-                        // Compute relative angle: (bearing to target − user heading) + obstacle offset.
-                        let relativeAngle = (bearingToTarget - heading) + obstacleOffset
-                        CompassView(angle: relativeAngle)
+                    if locationManager.location != nil && 
+                       locationManager.heading != nil && 
+                       nextAnchorCoordinate != nil {
+                        CompassView(angle: currentCompassAngle)
                             .padding()
+                            .onChange(of: locationManager.heading) { _ in
+                                updateCompassAngle()
+                            }
+                            .onChange(of: locationManager.location) { _ in
+                                updateCompassAngle()
+                            }
+                            .onChange(of: obstacleOffset) { _ in
+                                updateCompassAngle()
+                            }
                     }
                     Spacer()
                     // MiniMap at top right.
@@ -96,27 +117,34 @@ struct ContentView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Toggle("Force Local AR", isOn: $forceLocalMode)
-                        .toggleStyle(.button)
+                    Button(action: {
+                        showBluetoothSheet = true
+                    }) {
+                        HStack {
+                            Image(systemName: bluetoothService.connectedPeripheral != nil ? "bluetooth.circle.fill" : "bluetooth.circle")
+                            Text(bluetoothService.connectedPeripheral != nil ? "Connected" : "Connect Bluetooth")
+                        }
                         .padding()
-                        .background(Color.white.opacity(0.8))
+                        .background(Color.blue)
+                        .foregroundColor(.white)
                         .cornerRadius(10)
+                    }
+                    .padding()
                     
-                    Button("Select Destination") {
+                    Spacer()
+                    
+                    Button(action: {
                         showMap = true
+                    }) {
+                        Image(systemName: "map.fill")
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
                     }
                     .padding()
-                    .background(Color.white.opacity(0.8))
-                    .cornerRadius(10)
-                    
-                    Button("Toggle Depth View") {
-                        showDepthOverlay.toggle()
-                    }
-                    .padding()
-                    .background(Color.white.opacity(0.8))
-                    .cornerRadius(10)
                 }
-                .padding()
+                .background(Color.black.opacity(0.5))
             }
         }
         .onAppear {
@@ -126,11 +154,10 @@ struct ContentView: View {
             locationManager.stopUpdating()
         }
         .sheet(isPresented: $showMap) {
-            MapView(
-                selectedCoordinate: $selectedCoordinate,
-                locationManager: locationManager,
-                isPresented: $showMap
-            )
+            MapView(selectedCoordinate: $selectedCoordinate, locationManager: locationManager, isPresented: $showMap)
+        }
+        .sheet(isPresented: $showBluetoothSheet) {
+            BluetoothDeviceView()
         }
         .onChange(of: showMap) { oldValue, newValue in
             // When the map sheet is dismissed, fetch a route.
@@ -143,6 +170,7 @@ struct ContentView: View {
                         DispatchQueue.main.async {
                             self.routeCoordinates = spacedCoords
                             self.currentTargetIndex = 0 // Reset target index for new route.
+                            updateCompassAngle()
                         }
                     }
                 }
@@ -157,6 +185,7 @@ struct ContentView: View {
             let targetLocation = CLLocation(latitude: targetCoord.latitude, longitude: targetCoord.longitude)
             if newLocation.distance(from: targetLocation) < 1.0 {
                 currentTargetIndex += 1
+                updateCompassAngle()
             }
         }
     }
@@ -165,6 +194,7 @@ struct ContentView: View {
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
+            .environmentObject(BluetoothService())
     }
 }
 

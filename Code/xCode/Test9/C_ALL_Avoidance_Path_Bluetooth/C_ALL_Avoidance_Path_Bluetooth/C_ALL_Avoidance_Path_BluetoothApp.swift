@@ -7,13 +7,16 @@
 
 import SwiftUI
 import ARKit
-
+import CoreBluetooth
 
 @main
 struct C_ALL_Avoidance_Path_BluetoothApp: App {
+    @StateObject private var bluetoothService = BluetoothService()
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(bluetoothService)
         }
     }
 }
