@@ -43,7 +43,15 @@ struct ContentView: View {
               let targetCoord = nextAnchorCoordinate else { return }
         
         let bearingToTarget = bearingBetween(userCoord, targetCoord)
-        let relativeAngle = (bearingToTarget - heading) + obstacleOffset
+        var relativeAngle = (bearingToTarget - heading) + obstacleOffset
+        
+        // Normalize to -180 to +180 range
+        relativeAngle = (relativeAngle + 180).truncatingRemainder(dividingBy: 360) - 180
+        if relativeAngle < -180 {
+            relativeAngle += 360
+        }
+        
+        print("[COMPASS_POINTER] userCoord: \(userCoord), heading: \(heading), targetCoord: \(targetCoord), bearingToTarget: \(bearingToTarget), obstacleOffset: \(obstacleOffset), relativeAngle: \(relativeAngle)")
         currentCompassAngle = relativeAngle
         bluetoothService.sendCompassAngle(relativeAngle)
     }
