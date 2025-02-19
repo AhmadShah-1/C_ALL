@@ -92,18 +92,15 @@ class NumberReceiverService(Service):
         super().__init__(self.SERVICE_UUID, True)
         self._value = bytearray()
         self.loop = loop
+        self.latest_target = None  # Add this to track the latest target
+        self.movement_in_progress = False  # Add this to track if servo is moving
         logger.info("NumberReceiverService initialized")
 
     @characteristic("12345678-1234-5678-1234-56789abcdef1", Flags.READ | Flags.WRITE)
     def number_characteristic(self, *args, **kwargs):
-        # The read behavior simply returns the last received value.
         return self._value
 
     def _set_number(self, data, opts):
-        """
-        Called when a write is received on the characteristic.
-        Expects a UTF-8 encoded integer representing the absolute target angle.
-        """
         if data is None:
             logger.debug("Read request received.")
             return self._value
@@ -115,8 +112,13 @@ class NumberReceiverService(Service):
             logger.info(f"Received target angle: {target_angle}")
             logger.debug(f"Raw value received: {data}")
 
-            # Offload moving the servo to a separate thread so the BLE event loop isn't blocked.
-            self.loop.run_in_executor(None, control_servo, target_angle)
+            # Update the latest target
+            self.latest_target = target_angle
+            
+            # Only start a new movement if one isn't already in progress
+            if not self.movement_in_progress:
+                self.movement_in_progress = True
+                self.loop.run_in_executor(None, self._execute_movement)
             return True
         except ValueError as ve:
             logger.error(f"Invalid number format: {ve}")
@@ -125,6 +127,20 @@ class NumberReceiverService(Service):
             logger.error(f"Error processing data: {e}")
             logger.error(f"Raw data received: {data}")
             return False
+
+    def _execute_movement(self):
+        """Execute servo movement and check for new targets"""
+        try:
+            while self.latest_target is not None:
+                target = self.latest_target
+                self.latest_target = None  # Clear the target before moving
+                control_servo(target)  # Move to the target position
+                
+                # Small delay to prevent CPU overload but still be responsive
+                time.sleep(0.01)
+                
+        finally:
+            self.movement_in_progress = False
 
 # Set the setter function for the characteristic.
 NumberReceiverService.number_characteristic.setter_func = lambda service, data, opts: service._set_number(data, opts)
