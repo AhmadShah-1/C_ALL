@@ -19,10 +19,14 @@ struct ARWrapper: UIViewRepresentable {
     @Binding var routeCoordinates: [CLLocationCoordinate2D]
     @Binding var userLocation: CLLocation?
     @Binding var isGeoLocalized: Bool
-    @Binding var obstacleOffset: Double  // obstacle offset (in degrees)
-    @Binding var depthImage: UIImage?    // depth image for visualization
-    @Binding var isUsingLidar: Bool      // Add this binding to report active method
-    @Binding var showObstacleMeshes: Bool  // Add this binding
+    @Binding var obstacleOffset: Double
+    @Binding var depthImage: UIImage?
+    @Binding var isUsingLidar: Bool
+    @Binding var showObstacleMeshes: Bool
+    @Binding var showSceneMesh: Bool
+    @Binding var depthHorizontalShift: Int  // Binding for horizontal shift
+    @Binding var depthVerticalShift: Int    // Binding for vertical shift
+    @Binding var showDepthOverlay: Bool     // Binding for depth overlay toggle
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -31,14 +35,22 @@ struct ARWrapper: UIViewRepresentable {
     func makeUIView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
         context.coordinator.arView = arView
-        // Debug options (you may remove these later)
-        arView.debugOptions = [.showFeaturePoints, .showWorldOrigin]
+        
+        // Reduce default rendering quality to improve performance
+        arView.renderOptions = [.disableFaceMesh, .disableMotionBlur, .disableDepthOfField]
+        
+        // Only show necessary debug visualizations
+        arView.debugOptions = []  // Start with none, toggle as needed
+        
         startGeoTracking(in: arView, coordinator: context.coordinator)
         arView.session.delegate = context.coordinator
         
-        // Setup obstacle meshes
-        context.coordinator.setupObstacleMeshes()
-
+        // Only create obstacle meshes if actually showing them
+        if showObstacleMeshes {
+            context.coordinator.setupObstacleMeshes()
+        }
+        
+        // Add coaching overlay
         if #available(iOS 15.0, *) {
             let coachingOverlay = ARCoachingOverlayView()
             coachingOverlay.session = arView.session
@@ -46,21 +58,36 @@ struct ARWrapper: UIViewRepresentable {
             coachingOverlay.goal = .geoTracking
             arView.addSubview(coachingOverlay)
         }
+        
         return arView
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {
         context.coordinator.updateRouteIfNeeded(newCoordinates: routeCoordinates)
         
-        // Update mesh visibility based on toggle
+        // Update obstacle meshes
         if let leftMesh = context.coordinator.leftObstacleMeshEntity,
            let rightMesh = context.coordinator.rightObstacleMeshEntity,
            let centerMesh = context.coordinator.centerObstacleMeshEntity {
             
-            // Only show meshes if toggle is on and obstacles are detected
             leftMesh.isEnabled = showObstacleMeshes && context.coordinator.leftObstaclePresent
             rightMesh.isEnabled = showObstacleMeshes && context.coordinator.rightObstaclePresent
             centerMesh.isEnabled = showObstacleMeshes && context.coordinator.centerObstaclePresent
+        } else if showObstacleMeshes {
+            // Only create meshes if they don't exist and are needed
+            context.coordinator.setupObstacleMeshes()
+        }
+        
+        // Update ARKit debug options for scene mesh
+        if showSceneMesh != context.coordinator.debugMeshEnabled {
+            context.coordinator.debugMeshEnabled = showSceneMesh
+            
+            // Use built-in mesh visualization
+            if showSceneMesh {
+                uiView.debugOptions = [.showSceneUnderstanding]
+            } else {
+                uiView.debugOptions = []
+            }
         }
     }
 
@@ -71,18 +98,22 @@ struct ARWrapper: UIViewRepresentable {
         }
         
         let config = ARGeoTrackingConfiguration()
+        
+        // Reduce quality for better performance
         config.environmentTexturing = .automatic
         
-        // IMPORTANT: Enable depth data collection if available
+        // Only enable depth data if we're actually using it
         if #available(iOS 14.0, *) {
-            // Try to enable scene depth
-            print("DEBUG: Attempting to enable frameSemantics for sceneDepth")
-            if ARGeoTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            if (showDepthOverlay || showObstacleMeshes) && 
+               ARGeoTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
                 config.frameSemantics.insert(.sceneDepth)
-                print("DEBUG: Device supports depth with GeoTracking - enabled sceneDepth")
-            } else {
-                print("DEBUG: Device does NOT support depth with GeoTracking")
+                print("DEBUG: Enabled scene depth in configuration")
             }
+        }
+        
+        // Add performance-focused configuration
+        if #available(iOS 13.4, *) {
+            config.videoHDRAllowed = false  // Disable HDR for better performance
         }
         
         arView.session.run(config)
@@ -111,8 +142,33 @@ struct ARWrapper: UIViewRepresentable {
         var rightObstaclePresent: Bool = false
         var centerObstaclePresent: Bool = false
 
+        // Add scene mesh visualization properties
+        var sceneMeshAnchor: AnchorEntity?
+        var sceneMeshEntity: ModelEntity?
+        var meshOrigin: simd_float4x4?
+        var meshUpdateCounter: Int = 0 // To limit update frequency
+
+        // Simplified scene mesh properties
+        var debugMeshEnabled: Bool = false
+
+        // Add a frame counter to limit processing frequency
+        private var frameCounter = 0
+        private var lastProcessingTime = CFAbsoluteTimeGetCurrent()
+        
+        // Add automatic cleanup
+        private var cleanupTimer: Timer?
+        
+        // Outside any function, at class/struct level:
+        private var depthFrameCounter = 0
+        
         init(_ parent: ARWrapper) {
             self.parent = parent
+            super.init()
+            
+            // Setup a timer for periodic cleanup
+            cleanupTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+                self?.performMemoryCleanup()
+            }
             
             // Check device capability for LiDAR at initialization
             if #available(iOS 14.0, *) {
@@ -121,6 +177,26 @@ struct ARWrapper: UIViewRepresentable {
             } else {
                 print("DEBUG: Coordinator init - iOS < 14.0, no LiDAR support expected")
             }
+        }
+
+        deinit {
+            cleanupTimer?.invalidate()
+        }
+
+        func performMemoryCleanup() {
+            // Release any cached resources
+            if !parent.showObstacleMeshes {
+                leftObstacleMeshEntity = nil
+                rightObstacleMeshEntity = nil
+                centerObstacleMeshEntity = nil
+            }
+            
+            // Force a garbage collection cycle
+            autoreleasepool {
+                // Just creating an autorelease pool can help with memory
+            }
+            
+            print("DEBUG: Memory cleanup performed")
         }
 
         func updateRouteIfNeeded(newCoordinates: [CLLocationCoordinate2D]) {
@@ -159,23 +235,38 @@ struct ARWrapper: UIViewRepresentable {
 
         /// Called every frame.
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            // Update mesh positions based on camera position
+            // Throttle processing for better performance
+            frameCounter += 1
+            if frameCounter % 2 != 0 {
+                return  // Process every other frame
+            }
+            
+            // Update obstacle mesh positions
             positionObstacleMeshes()
             
-            // Existing code for depth or feature point processing
+            // Process depth or feature points for obstacle detection
             if frame.sceneDepth != nil {
-                print("DEBUG: LiDAR DEPTH DATA AVAILABLE - using LiDAR for obstacle detection")
+                // Use depth data for obstacle detection
                 processDepthDataForObstacles(frame: frame)
+                
+                // Update depth visualization if enabled
+                if parent.showDepthOverlay {
+                    parent.depthImage = createDepthVisualization(depthMap: frame.sceneDepth!.depthMap)
+                }
+                
                 DispatchQueue.main.async {
                     self.parent.isUsingLidar = true
                 }
             } else {
-                print("DEBUG: NO DEPTH DATA - using feature points for obstacle detection")
+                // Use feature points for obstacle detection
                 updateObstacleOffsetFromFeaturePoints(frame: frame)
                 DispatchQueue.main.async {
                     self.parent.isUsingLidar = false
                 }
             }
+            
+            // Clean up resources periodically
+            cleanupUnusedResources()
         }
 
         /// New function that uses ARKit's raw feature points to compute an obstacle offset.
@@ -190,7 +281,7 @@ struct ARWrapper: UIViewRepresentable {
             let cameraPos = cameraTransform.columns.3.xyz
             // Get camera coordinate axes.
             let right = cameraTransform.columns.0.xyz
-            let up = cameraTransform.columns.1.xyz
+            _ = cameraTransform.columns.1.xyz  // Or just remove it if not needed
             // Define forward such that it points out in front of the camera.
             // In ARKit, the camera's forward vector is -Z, so we reverse it:
             let forward = -cameraTransform.columns.2.xyz
@@ -247,27 +338,16 @@ struct ARWrapper: UIViewRepresentable {
         }
 
         func processDepthDataForObstacles(frame: ARFrame) {
-            // Check if depth data is available (LiDAR)
+            // Check if depth data is available
             guard let depthMap = frame.sceneDepth?.depthMap else {
                 print("DEBUG: processDepthDataForObstacles called but no depth map available")
                 return
             }
             
-            print("DEBUG: Processing depth map with dimensions: \(CVPixelBufferGetWidth(depthMap)) x \(CVPixelBufferGetHeight(depthMap))")
-            
-            // Process the depth map to detect obstacles
-            // This is a simplified version - you would need to adapt this
-            
-            // Get the depth image dimensions
             let width = CVPixelBufferGetWidth(depthMap)
             let height = CVPixelBufferGetHeight(depthMap)
             
-            // Calculate the center region of interest
-            let centerX = width / 2
-            let centerY = height / 2
-            let regionSize = min(width, height) / 4
-            
-            // Lock the buffer for reading
+            // Lock the buffer
             CVPixelBufferLockBaseAddress(depthMap, .readOnly)
             defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
             
@@ -276,81 +356,232 @@ struct ARWrapper: UIViewRepresentable {
             }
             
             let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
-            let depthPointer = baseAddress.assumingMemoryBound(to: Float32.self)
+            let depthData = baseAddress.assumingMemoryBound(to: Float32.self)
             
-            // Check left and right regions for obstacles
-            var leftObstacles = 0
-            var rightObstacles = 0
+            // Define regions of interest
+            let leftRegion = CGRect(x: 0, y: 0, width: width/3, height: height)
+            let rightRegion = CGRect(x: 2*width/3, y: 0, width: width/3, height: height)
             
-            // Check points in the left and right regions
-            for y in (centerY - regionSize)...(centerY + regionSize) {
-                for x in 0..<width {
-                    // Skip points outside our horizontal regions of interest
-                    if x > centerX - regionSize && x < centerX + regionSize {
-                        continue // Skip the center region
+            var leftObstacleCount = 0
+            var rightObstacleCount = 0
+            
+            // Sample at a lower resolution to improve performance
+            let samplingStep = 8  // Check every 8th pixel
+            
+            // Check points in the left region
+            for y in stride(from: Int(leftRegion.minY), to: Int(leftRegion.maxY), by: samplingStep) {
+                for x in stride(from: Int(leftRegion.minX), to: Int(leftRegion.maxX), by: samplingStep) {
+                    let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
+                    let depth = depthData[offset]
+                    
+                    // Count as obstacle if within range (0.3m to 1.5m)
+                    if depth >= 0.3 && depth <= 1.5 {
+                        leftObstacleCount += 1
+                    }
+                }
+            }
+            
+            // Check points in the right region
+            for y in stride(from: Int(rightRegion.minY), to: Int(rightRegion.maxY), by: samplingStep) {
+                for x in stride(from: Int(rightRegion.minX), to: Int(rightRegion.maxX), by: samplingStep) {
+                    let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
+                    let depth = depthData[offset]
+                    
+                    // Count as obstacle if within range (0.3m to 1.5m)
+                    if depth >= 0.3 && depth <= 1.5 {
+                        rightObstacleCount += 1
+                    }
+                }
+            }
+            
+            // Calculate obstacle presence
+            let threshold = width * height / (samplingStep * samplingStep) / 20  // Adaptive threshold
+            
+            // Determine obstacle direction
+            var offset: Double = 0
+            leftObstaclePresent = leftObstacleCount > threshold
+            rightObstaclePresent = rightObstacleCount > threshold
+            
+            // Fix the type conversion issue here
+            let leftThreshold = Int(Double(rightObstacleCount) * 1.2)
+            let rightThreshold = Int(Double(leftObstacleCount) * 1.2)
+            
+            if leftObstacleCount > threshold && leftObstacleCount > leftThreshold {
+                // More obstacles on left, steer right
+                offset = 30
+            } else if rightObstacleCount > threshold && rightObstacleCount > rightThreshold {
+                // More obstacles on right, steer left
+                offset = -30
+            }
+            
+            self.parent.obstacleOffset = offset
+        }
+
+        func createDepthVisualization(depthMap: CVPixelBuffer) -> UIImage? {
+            let width = CVPixelBufferGetWidth(depthMap)
+            let height = CVPixelBufferGetHeight(depthMap)
+            
+            // Lock the buffer
+            CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+            
+            // Get depth data
+            guard let baseAddress = CVPixelBufferGetBaseAddress(depthMap) else {
+                return nil
+            }
+            
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
+            let depthData = baseAddress.assumingMemoryBound(to: Float32.self)
+            
+            // Create an RGBA bitmap context for the output
+            let rotatedWidth = height
+            let rotatedHeight = width
+            let bitsPerComponent = 8
+            let bytesPerPixel = 4
+            let rotatedBytesPerRow = rotatedWidth * bytesPerPixel
+            
+            guard let context = CGContext(
+                data: nil,
+                width: rotatedWidth,
+                height: rotatedHeight,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: rotatedBytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                return nil
+            }
+            
+            guard let buffer = context.data else {
+                return nil
+            }
+            
+            let pixelBuffer = buffer.bindMemory(to: UInt8.self, capacity: rotatedHeight * rotatedBytesPerRow)
+            
+            // Define min/max depth range for visualization
+            let minDepth: Float = 0.0
+            let maxDepth: Float = 3.0  // 3 meters
+            
+            // Use parent's shift values
+            let horizontalShift = parent.depthHorizontalShift
+            let verticalShift = parent.depthVerticalShift
+            
+            // Moderate downsampling for performance
+            let downsample = 2
+            
+            // ROTATE LEFT (90° counterclockwise) WITH SHIFTS
+            for y in stride(from: 0, to: height, by: downsample) {
+                for x in stride(from: 0, to: width, by: downsample) {
+                    let inputOffset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
+                    let depth = depthData[inputOffset]
+                    
+                    // Skip invalid depth values
+                    if depth.isNaN || depth < minDepth || depth > maxDepth {
+                        continue
                     }
                     
-                    let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
-                    let depth = depthPointer[offset]
+                    // Normalize depth value to 0-1 range
+                    let normalizedDepth = 1.0 - ((depth - minDepth) / (maxDepth - minDepth))
                     
-                    // Check if this point is within our obstacle detection range
-                    if depth > 0.5 && depth < 2.0 { // Between 0.5 and 2 meters
-                        if x < centerX {
-                            leftObstacles += 1
-                        } else {
-                            rightObstacles += 1
+                    // Convert to color (red = near, blue = far)
+                    let red = UInt8(normalizedDepth * 255.0)
+                    let blue = UInt8((1.0 - normalizedDepth) * 255.0)
+                    
+                    // Compute rotated coordinates (90° counterclockwise)
+                    let rotatedX = height - 1 - y
+                    let rotatedY = x
+                    
+                    // Apply shifts
+                    let shiftedX = rotatedX + horizontalShift
+                    let shiftedY = rotatedY + verticalShift
+                    
+                    // Skip if the shifted coordinate is outside bounds
+                    if shiftedX < 0 || shiftedX >= rotatedWidth || 
+                       shiftedY < 0 || shiftedY >= rotatedHeight {
+                        continue
+                    }
+                    
+                    // Set pixel color in output buffer
+                    let outputOffset = (shiftedY * rotatedBytesPerRow) + (shiftedX * bytesPerPixel)
+                    pixelBuffer[outputOffset] = red     // R
+                    pixelBuffer[outputOffset + 1] = 0   // G
+                    pixelBuffer[outputOffset + 2] = blue // B
+                    pixelBuffer[outputOffset + 3] = 255 // A (fully opaque)
+                    
+                    // Fill a small square for each depth point to compensate for downsampling
+                    for dy in 0..<downsample {
+                        for dx in 0..<downsample {
+                            let fillX = shiftedX + dx
+                            let fillY = shiftedY + dy
+                            if fillX < rotatedWidth && fillY < rotatedHeight {
+                                let fillOffset = (fillY * rotatedBytesPerRow) + (fillX * bytesPerPixel)
+                                pixelBuffer[fillOffset] = red     // R
+                                pixelBuffer[fillOffset + 1] = 0   // G
+                                pixelBuffer[fillOffset + 2] = blue // B
+                                pixelBuffer[fillOffset + 3] = 255 // A (fully opaque)
+                            }
                         }
                     }
                 }
             }
             
-            // Determine which side has more obstacles
-            let threshold = 100 // You'll need to tune this based on testing
-            
-            var offset: Double = 0
-            // Convert to Double for comparison
-            let leftObstaclesDouble = Double(leftObstacles)
-            let rightObstaclesDouble = Double(rightObstacles)
-
-            if leftObstacles > threshold && leftObstaclesDouble > rightObstaclesDouble * 1.5 {
-                // More obstacles on left side, suggest steering right
-                offset = 30
-            } else if rightObstacles > threshold && rightObstaclesDouble > leftObstaclesDouble * 1.5 {
-                // More obstacles on right side, suggest steering left
-                offset = -30
-            }
-            
-            self.parent.obstacleOffset = offset
-            
-            // Create a visualization of the depth map for debugging
-            self.parent.depthImage = createDepthVisualization(depthMap: depthMap)
-            
-            // After processing depth data, update obstacle detection flags
-            leftObstaclePresent = leftObstacles > threshold
-            rightObstaclePresent = rightObstacles > threshold
-            centerObstaclePresent = false // You can add center obstacle detection logic
-            
-            // Update mesh visibility based on obstacle detection
-            updateMeshVisibility()
-        }
-
-        func createDepthVisualization(depthMap: CVPixelBuffer) -> UIImage? {
-            // Convert depth data to a visualization
-            let ciImage = CIImage(cvPixelBuffer: depthMap)
-            let context = CIContext()
-            
-            // Apply a filter to make the depth visible
-            let colorFilter = CIFilter(name: "CIFalseColor")
-            colorFilter?.setValue(ciImage, forKey: kCIInputImageKey)
-            colorFilter?.setValue(CIColor(red: 0, green: 0, blue: 1), forKey: "inputColor0")
-            colorFilter?.setValue(CIColor(red: 1, green: 0, blue: 0), forKey: "inputColor1")
-            
-            guard let outputImage = colorFilter?.outputImage,
-                  let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+            // Create image from context
+            guard let cgImage = context.makeImage() else {
                 return nil
             }
             
             return UIImage(cgImage: cgImage)
+        }
+
+        // Helper function to add orientation markers
+        func addOrientationMarkers(to inputImage: CGImage) -> CGImage {
+            let width = inputImage.width
+            let height = inputImage.height
+            
+            // Create a context with the same dimensions
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            
+            // Draw the original image
+            context.draw(inputImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            
+            // Draw orientation markers
+            context.setStrokeColor(UIColor.white.cgColor)
+            context.setLineWidth(5)
+            
+            // Draw a T shape at the top of the image
+            context.move(to: CGPoint(x: width/2, y: 10))
+            context.addLine(to: CGPoint(x: width/2, y: height/10))
+            context.strokePath()
+            
+            context.move(to: CGPoint(x: width/2 - width/10, y: 10))
+            context.addLine(to: CGPoint(x: width/2 + width/10, y: 10))
+            context.strokePath()
+            
+            // Draw a circle at the right side
+            context.addEllipse(in: CGRect(x: width - 30, y: height/2 - 15, width: 30, height: 30))
+            context.strokePath()
+            
+            // Draw a square at the bottom
+            context.addRect(CGRect(x: width/2 - 15, y: height - 30, width: 30, height: 30))
+            context.strokePath()
+            
+            // Draw a triangle at the left side
+            context.move(to: CGPoint(x: 15, y: height/2))
+            context.addLine(to: CGPoint(x: 30, y: height/2 - 15))
+            context.addLine(to: CGPoint(x: 30, y: height/2 + 15))
+            context.closePath()
+            context.strokePath()
+            
+            // Get the resulting image
+            return context.makeImage()!
         }
 
         // Method to create and position obstacle meshes
@@ -363,36 +594,33 @@ struct ARWrapper: UIViewRepresentable {
                 arView.scene.addAnchor(obstacleAnchor!)
             }
             
-            // Create left obstacle mesh if it doesn't exist
-            if leftObstacleMeshEntity == nil {
-                leftObstacleMeshEntity = createObstacleMesh(color: .red)
-            }
+            // Create meshes using a shared material to reduce memory usage
+            let redMaterial = SimpleMaterial(color: .red.withAlphaComponent(0.3), roughness: 0.5, isMetallic: false)
+            let blueMaterial = SimpleMaterial(color: .blue.withAlphaComponent(0.3), roughness: 0.5, isMetallic: false)
+            let yellowMaterial = SimpleMaterial(color: .yellow.withAlphaComponent(0.3), roughness: 0.5, isMetallic: false)
             
-            // Create right obstacle mesh if it doesn't exist
-            if rightObstacleMeshEntity == nil {
-                rightObstacleMeshEntity = createObstacleMesh(color: .blue)
-            }
+            // Use a shared mesh for all obstacles to reduce memory usage
+            let sharedMesh = MeshResource.generateBox(width: 1.0, height: 2.0, depth: 0.2)
             
-            // Create center obstacle mesh if it doesn't exist
-            if centerObstacleMeshEntity == nil {
-                centerObstacleMeshEntity = createObstacleMesh(color: .yellow)
-            }
+            // Create obstacle entities
+            leftObstacleMeshEntity = ModelEntity(mesh: sharedMesh, materials: [redMaterial])
+            rightObstacleMeshEntity = ModelEntity(mesh: sharedMesh, materials: [blueMaterial])
+            centerObstacleMeshEntity = ModelEntity(mesh: sharedMesh, materials: [yellowMaterial])
             
-            // Position the meshes
-            positionObstacleMeshes()
-        }
-
-        // Create a semi-transparent colored mesh for obstacle visualization
-        func createObstacleMesh(color: UIColor) -> ModelEntity {
-            let boxMesh = MeshResource.generateBox(width: 1.0, height: 2.0, depth: 0.2)
-            let material = SimpleMaterial(color: color.withAlphaComponent(0.3), roughness: 0.3, isMetallic: true)
-            let entity = ModelEntity(mesh: boxMesh, materials: [material])
-            entity.isEnabled = false  // Start disabled
+            // Position meshes
+            leftObstacleMeshEntity?.position = SIMD3<Float>(-1.0, 0, -2.0)
+            rightObstacleMeshEntity?.position = SIMD3<Float>(1.0, 0, -2.0)
+            centerObstacleMeshEntity?.position = SIMD3<Float>(0, 0, -2.0)
             
-            // Add to obstacle anchor
-            obstacleAnchor?.addChild(entity)
+            // Start with all meshes disabled
+            leftObstacleMeshEntity?.isEnabled = false
+            rightObstacleMeshEntity?.isEnabled = false
+            centerObstacleMeshEntity?.isEnabled = false
             
-            return entity
+            // Add to scene
+            obstacleAnchor?.addChild(leftObstacleMeshEntity!)
+            obstacleAnchor?.addChild(rightObstacleMeshEntity!)
+            obstacleAnchor?.addChild(centerObstacleMeshEntity!)
         }
 
         // Position the obstacle meshes in front of the camera
@@ -413,6 +641,76 @@ struct ARWrapper: UIViewRepresentable {
             leftObstacleMeshEntity?.isEnabled = leftObstaclePresent
             rightObstacleMeshEntity?.isEnabled = rightObstaclePresent
             centerObstacleMeshEntity?.isEnabled = centerObstaclePresent
+        }
+
+        // Add a lightweight obstacle detection function
+        func processDepthDataForObstaclesLightweight(frame: ARFrame) {
+            guard let depthMap = frame.sceneDepth?.depthMap else { return }
+            
+            // Very lightweight sampling - just check a few key areas
+            let width = CVPixelBufferGetWidth(depthMap)
+            let height = CVPixelBufferGetHeight(depthMap)
+            
+            CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+            
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
+            guard let baseAddress = CVPixelBufferGetBaseAddress(depthMap) else { return }
+            let depthData = baseAddress.assumingMemoryBound(to: Float32.self)
+            
+            // Sample just 9 points (left, center, right) x (top, middle, bottom)
+            var leftObstacleCount = 0
+            var rightObstacleCount = 0
+            
+            // Use very sparse sampling - just a few points in each region
+            let samplePoints = [
+                (width/6, height/4), (width/6, height/2), (width/6, 3*height/4),   // Left column
+                (width/2, height/4), (width/2, height/2), (width/2, 3*height/4),   // Center column
+                (5*width/6, height/4), (5*width/6, height/2), (5*width/6, 3*height/4)  // Right column
+            ]
+            
+            for (x, y) in samplePoints {
+                let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
+                let depth = depthData[offset]
+                
+                // Skip invalid depths or those too far away
+                if depth.isNaN || depth <= 0.2 || depth > 3.0 {
+                    continue
+                }
+                
+                // Count obstacles in left and right regions
+                if x < width/3 {
+                    leftObstacleCount += 1
+                } else if x > 2*width/3 {
+                    rightObstacleCount += 1
+                }
+            }
+            
+            // Determine obstacle direction
+            var offset: Double = 0
+            if leftObstacleCount > rightObstacleCount && leftObstacleCount >= 2 {
+                offset = 30
+            } else if rightObstacleCount > leftObstacleCount && rightObstacleCount >= 2 {
+                offset = -30
+            }
+            
+            self.parent.obstacleOffset = offset
+        }
+
+        func cleanupUnusedResources() {
+            // Only perform cleanup occasionally
+            if frameCounter % 300 != 0 { // Every ~10 seconds at 30fps
+                return
+            }
+            
+            // Force release autoreleased objects
+            autoreleasepool {
+                if !parent.showDepthOverlay && parent.depthImage != nil {
+                    DispatchQueue.main.async {
+                        self.parent.depthImage = nil
+                    }
+                }
+            }
         }
     }
 }

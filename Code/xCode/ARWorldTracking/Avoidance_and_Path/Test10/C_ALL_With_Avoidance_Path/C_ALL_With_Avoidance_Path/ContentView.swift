@@ -19,6 +19,9 @@ struct ContentView: View {
     @State private var lidarAvailable: Bool = false
     @State private var isUsingLidar: Bool = false  // Track whether LiDAR is actively being used
     @State private var showObstacleMeshes: Bool = true  // Add this property
+    @State private var depthHorizontalShift: Int = -10  // Default horizontal offset
+    @State private var depthVerticalShift: Int = 0      // Default vertical offset
+    @State private var showSceneMesh: Bool = false  // Added for ARWrapper
 
     /// Returns the current target coordinate from the route.
     var nextAnchorCoordinate: CLLocationCoordinate2D? {
@@ -48,7 +51,11 @@ struct ContentView: View {
                 obstacleOffset: $obstacleOffset,
                 depthImage: $depthImage,
                 isUsingLidar: $isUsingLidar,
-                showObstacleMeshes: $showObstacleMeshes
+                showObstacleMeshes: $showObstacleMeshes,
+                showSceneMesh: $showSceneMesh,
+                depthHorizontalShift: $depthHorizontalShift,
+                depthVerticalShift: $depthVerticalShift,
+                showDepthOverlay: $showDepthOverlay
             )
             .edgesIgnoringSafeArea(.all)
             
@@ -147,6 +154,63 @@ struct ContentView: View {
                 featurePointsIcon
             }
             .padding(.horizontal)
+            
+            // This should be part of your UI section when showDepthOverlay is true
+            if showDepthOverlay {
+                VStack {
+                    HStack {
+                        Button("-") {
+                            depthHorizontalShift -= 5
+                        }
+                        .padding(10)
+                        .background(Color.black.opacity(0.6))
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                        
+                        Text("H: \(depthHorizontalShift)")
+                            .padding(5)
+                            .background(Color.black.opacity(0.6))
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                        
+                        Button("+") {
+                            depthHorizontalShift += 5
+                        }
+                        .padding(10)
+                        .background(Color.black.opacity(0.6))
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.top, 50)
+                    
+                    HStack {
+                        Button("-") {
+                            depthVerticalShift -= 5
+                        }
+                        .padding(10)
+                        .background(Color.black.opacity(0.6))
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                        
+                        Text("V: \(depthVerticalShift)")
+                            .padding(5)
+                            .background(Color.black.opacity(0.6))
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                        
+                        Button("+") {
+                            depthVerticalShift += 5
+                        }
+                        .padding(10)
+                        .background(Color.black.opacity(0.6))
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                    .padding(.bottom, 5)
+                }
+                .position(x: UIScreen.main.bounds.width - 100, y: 100)
+                .animation(.easeInOut, value: showDepthOverlay)
+            }
         }
         .onAppear {
             locationManager.startUpdating()
