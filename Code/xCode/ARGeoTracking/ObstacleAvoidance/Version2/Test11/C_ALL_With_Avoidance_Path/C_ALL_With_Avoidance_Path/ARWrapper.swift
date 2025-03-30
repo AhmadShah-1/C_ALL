@@ -3,8 +3,8 @@ import ARKit
 import RealityKit
 import CoreLocation
 
-//asd
-// Helper function to compare two arrays of CLLocationCoordinate2D.
+
+// Helper function to compare two arrays of CLLocationCoordinate2D
 func areCoordinatesEqual(_ lhs: [CLLocationCoordinate2D], _ rhs: [CLLocationCoordinate2D]) -> Bool {
     guard lhs.count == rhs.count else { return false }
     for (c1, c2) in zip(lhs, rhs) {
@@ -260,7 +260,63 @@ struct ARWrapper: UIViewRepresentable {
             // Process depth or feature points for obstacle detection
             if frame.sceneDepth != nil {
                 // Use depth data for obstacle detection and clear path finding
-                findClearPathFromDepthData(frame: frame)
+                if let clearPathAngleRadians = findClearPathFromDepthData(frame: frame) {
+                    // Convert radians to degrees and update clearPath properties
+                    // IMPORTANT: In our coordinate system 0 is front, π/2 is left, 3π/2 is right
+                    let angleInDegrees = Double(clearPathAngleRadians * 180 / Float.pi)
+                    clearPathAngle = angleInDegrees
+                    isPathClear = true
+                    
+                    // FIXED: The correct interpretation of angles for obstacle presence
+                    // When clearPathAngle is on the left half of the circle (0-π),
+                    // it means the obstacle is on the right,
+                    // When clearPathAngle is on the right half of the circle (π-2π),
+                    // it means the obstacle is on the left
+                    
+                    // π/2 (90°) is left, 3π/2 (270°) is right in our coordinate system
+                    let leftDirection: Float = Float.pi / 2
+                    let rightDirection: Float = 3 * Float.pi / 2
+                    
+                    // Determine where the clear path is pointing (left side or right side)
+                    let angularDistanceToLeft = min(
+                        abs(clearPathAngleRadians - leftDirection),
+                        abs(clearPathAngleRadians - (leftDirection + 2 * Float.pi))
+                    )
+                    let angularDistanceToRight = min(
+                        abs(clearPathAngleRadians - rightDirection),
+                        abs(clearPathAngleRadians - (rightDirection + 2 * Float.pi))
+                    )
+                    
+                    // If the clear path is closer to left direction, obstacle is on right
+                    // If the clear path is closer to right direction, obstacle is on left
+                    rightObstaclePresent = angularDistanceToLeft < angularDistanceToRight
+                    leftObstaclePresent = angularDistanceToRight < angularDistanceToLeft
+                    centerObstaclePresent = false
+                    
+                    if frameCounter % 300 == 0 {
+                        print("ANGLE DEBUG: Clear path angle: \(angleInDegrees)°")
+                        print("ANGLE DEBUG: Left obstacle: \(leftObstaclePresent), Right obstacle: \(rightObstaclePresent)")
+                        print("ANGLE DEBUG: Angular distance to left: \(angularDistanceToLeft), to right: \(angularDistanceToRight)")
+                        
+                        // Print the detected direction interpretation
+                        let normalizedAngle = (angleInDegrees + 360).truncatingRemainder(dividingBy: 360)
+                        if normalizedAngle > 0 && normalizedAngle < 180 {
+                            print("ANGLE DEBUG: Clear path in LEFT half (0-180°) - Suggests turning LEFT")
+                        } else {
+                            print("ANGLE DEBUG: Clear path in RIGHT half (180-360°) - Suggests turning RIGHT")
+                        }
+                    }
+                } else {
+                    // No clear path found
+                    isPathClear = false
+                    // Default to uncertain state for obstacles
+                    leftObstaclePresent = true
+                    rightObstaclePresent = true
+                    centerObstaclePresent = true
+                }
+                
+                // Update mesh visibility based on obstacle flags
+                updateMeshVisibility()
                 
                 // Update depth visualization if enabled
                 if parent.showDepthOverlay {
@@ -272,6 +328,12 @@ struct ARWrapper: UIViewRepresentable {
                     // Only update cluster visualization every 10 frames for performance
                     clusteredDepthImage = createClusteredDepthVisualization(frame: frame)
                     parent.depthImage = clusteredDepthImage
+                }
+                
+                // Print depth settings occasionally for debugging
+                if frameCounter % 300 == 0 {
+                    print("DEBUG: Using fixed 4.0m maximum range with minimum clear distance: \(parent.minClearDistance)m")
+                    print("DEBUG: Clear path available: \(isPathClear), angle: \(clearPathAngle)°")
                 }
                 
                 DispatchQueue.main.async {
@@ -359,98 +421,174 @@ struct ARWrapper: UIViewRepresentable {
             // Optionally handle overlay deactivation.
         }
 
-        func findClearPathFromDepthData(frame: ARFrame) {
-            // Check if depth data is available
+        func findClearPathFromDepthData(frame: ARFrame) -> Float? {
             guard let depthMap = frame.sceneDepth?.depthMap else {
-                return
+                return nil
             }
             
             let width = CVPixelBufferGetWidth(depthMap)
             let height = CVPixelBufferGetHeight(depthMap)
             
-            // Lock the buffer
+            // Create depth sectors for determining clearest path
+            let sectorCount = 16  // Number of sectors to check
+            let sectorWidth = Float.pi / Float(sectorCount) // Width of each sector in radians (1/4 of the full circle)
+            
+            var sectorClearPoints = [Int](repeating: 0, count: sectorCount * 2) // Full 360° circle
+            var sectorTotalValidPoints = [Int](repeating: 0, count: sectorCount * 2)
+            
+            // Set up fixed parameters
+            let maxDepthDistance: Float = 4.0 // Maximum visual range fixed at 4.0m
+            let minClearDistance = parent.minClearDistance // Minimum distance needed to be considered "clear"
+            
+            // Use iPhone camera center for calculations
+            let centerX = width / 2
+            let centerY = height / 2
+            
+            // Lock the buffer for reading
             CVPixelBufferLockBaseAddress(depthMap, .readOnly)
             defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
             
             guard let baseAddress = CVPixelBufferGetBaseAddress(depthMap) else {
-                return
+                return nil
             }
             
             let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
             let depthData = baseAddress.assumingMemoryBound(to: Float32.self)
             
-            // Use the configurable minimum clear distance
-            let minClearDistance = parent.minClearDistance
+            // Sample more points for better accuracy
+            let step = 8  // Sample every 8th pixel for a balance of performance and accuracy
             
-            // Divide the view into sectors and analyze each sector
-            let sectorCount = 7 // Number of sectors to analyze
-            var sectorScores = [Int](repeating: 0, count: sectorCount)
-            let sectorWidth = width / sectorCount
+            var totalSampledPoints = 0
+            var validSamplePoints = 0
+            var beyondRangePoints = 0
             
-            // Sample at a lower resolution to improve performance
-            let samplingStep = 8  // Check every 8th pixel
+            // Debug matrices to visualize point distribution (5x5 grid)
+            var depthPointsGrid = [[Int]](repeating: [Int](repeating: 0, count: 5), count: 5)
+            var clearPointsGrid = [[Int]](repeating: [Int](repeating: 0, count: 5), count: 5)
             
-            for sector in 0..<sectorCount {
-                let sectorStartX = sector * sectorWidth
-                let sectorEndX = (sector + 1) * sectorWidth
-                
-                var clearPoints = 0
-                var totalPoints = 0
-                
-                // Check points in this sector
-                for y in stride(from: 0, to: height, by: samplingStep) {
-                    for x in stride(from: sectorStartX, to: sectorEndX, by: samplingStep) {
-                        let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
-                        let depth = depthData[offset]
-                        
-                        // Count points that are beyond our minimum clear distance
-                        // Also don't count points that exceed the max distance or are invalid
-                        if !depth.isNaN && depth >= minClearDistance && depth <= parent.maxDepthDistance {
-                            clearPoints += 1
-                        }
-                        totalPoints += 1
+            for y in stride(from: height/4, to: 3*height/4, by: step) {
+                for x in stride(from: width/4, to: 3*width/4, by: step) {
+                    totalSampledPoints += 1
+                    
+                    // Calculate coordinates relative to center
+                    let relX = Float(x - centerX)
+                    let relY = Float(y - centerY)
+                    
+                    // For debug visualization, map to a 5x5 grid
+                    let gridX = min(max(Int((Float(x) / Float(width)) * 5), 0), 4)
+                    let gridY = min(max(Int((Float(y) / Float(height)) * 5), 0), 4)
+                    
+                    // Calculate angle properly accounting for depth camera orientation
+                    // Apply 90° counterclockwise rotation to align with camera view
+                    // Note that the depth camera's coordinate system may be different than expected
+                    let rotatedRelX = -relY // 90° counterclockwise rotation
+                    let rotatedRelY = relX
+                    
+                    // Calculate angle in 0-2π range with 0 corresponding to straight ahead
+                    var angle = atan2(rotatedRelY, rotatedRelX)
+                    if angle < 0 {
+                        angle += 2 * Float.pi
                     }
+                    
+                    // Calculate corresponding sector 
+                    let sectorIndex = min(Int(angle / sectorWidth), sectorCount * 2 - 1)
+                    
+                    // Get depth value
+                    let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
+                    let depth = depthData[offset]
+                    
+                    // Skip NaN or zero depth values
+                    if depth.isNaN || depth <= 0 {
+                        continue
+                    }
+                    
+                    validSamplePoints += 1
+                    depthPointsGrid[gridY][gridX] += 1
+                    
+                    // Points beyond max depth distance are treated as clear paths
+                    if depth > maxDepthDistance {
+                        sectorClearPoints[sectorIndex] += 1
+                        beyondRangePoints += 1
+                        sectorTotalValidPoints[sectorIndex] += 1
+                        clearPointsGrid[gridY][gridX] += 1
+                        continue
+                    }
+                    
+                    // Count points that are beyond our minimum clear distance
+                    if depth >= minClearDistance && depth <= maxDepthDistance {
+                        sectorClearPoints[sectorIndex] += 1
+                        clearPointsGrid[gridY][gridX] += 1
+                    }
+                    
+                    sectorTotalValidPoints[sectorIndex] += 1
+                }
+            }
+            
+            // Find the sector with the most clear space (highest percentage)
+            var maxClearPercentage: Float = 0
+            var clearestSectorIndex = -1
+            
+            // Debug string to visualize sector occupation
+            var sectorDebug = ""
+            
+            for i in 0..<(sectorCount * 2) {
+                if sectorTotalValidPoints[i] > 0 {
+                    let clearPercentage = Float(sectorClearPoints[i]) / Float(sectorTotalValidPoints[i])
+                    
+                    // Build sector visualization (C=clear, X=obstacle)
+                    let sectorChar = clearPercentage >= 0.6 ? "C" : "X"
+                    sectorDebug += sectorChar
+                    
+                    // Debug: Print sector percentages occasionally
+                    if frameCounter % 300 == 0 && i % 4 == 0 {
+                        let angleInDegrees = Float(i) * sectorWidth * 180 / Float.pi
+                        print("Sector \(i) (\(angleInDegrees)°): \(clearPercentage * 100)% clear (\(sectorClearPoints[i])/\(sectorTotalValidPoints[i]))")
+                    }
+                    
+                    if clearPercentage > maxClearPercentage {
+                        maxClearPercentage = clearPercentage
+                        clearestSectorIndex = i
+                    }
+                } else {
+                    sectorDebug += "·" // Empty sector
+                }
+            }
+            
+            // Print detailed debug information occasionally
+            if frameCounter % 300 == 0 {
+                // Print point distribution grid
+                print("Depth Point Distribution (5x5 grid):")
+                for row in depthPointsGrid {
+                    let rowStr = row.map { $0 > 0 ? "O" : "·" }.joined()
+                    print(rowStr)
                 }
                 
-                // Calculate score as percentage of clear points
-                if totalPoints > 0 {
-                    sectorScores[sector] = (clearPoints * 100) / totalPoints
+                print("Clear Point Distribution (5x5 grid):")
+                for row in clearPointsGrid {
+                    let rowStr = row.map { $0 > 0 ? "C" : "·" }.joined()
+                    print(rowStr)
                 }
+                
+                print("Sector occupation (0° → 360°): \(sectorDebug)")
+                print("Total sampled: \(totalSampledPoints), Valid: \(validSamplePoints), Beyond range: \(beyondRangePoints) (\(Float(beyondRangePoints)/Float(validSamplePoints) * 100)% of valid points)")
+                print("Using min clear distance: \(minClearDistance)m, max visual range: \(maxDepthDistance)m")
             }
             
-            // Find the sector with the highest score (most clear points)
-            var bestSector = 3 // Default to middle sector
-            var bestScore = 0
-            
-            for (i, score) in sectorScores.enumerated() {
-                if score > bestScore {
-                    bestScore = score
-                    bestSector = i
+            // If we found a clear sector with sufficient data
+            if clearestSectorIndex >= 0 && maxClearPercentage >= 0.6 { // 60% clear threshold
+                // Calculate the center angle of the sector in radians (0 is front)
+                let sectorAngle = (Float(clearestSectorIndex) + 0.5) * sectorWidth
+                
+                // Debug: Print chosen sector occasionally
+                if frameCounter % 300 == 0 {
+                    print("Clearest sector: \(clearestSectorIndex) (\(maxClearPercentage * 100)% clear)")
+                    print("Angle: \(sectorAngle * 180 / Float.pi)° from front")
                 }
+                
+                return sectorAngle
             }
             
-            // The clear path threshold - at least 60% of points should be clear
-            let clearPathThreshold = 60
-            
-            // Convert best sector to an angle (0 is straight ahead, positive is right, negative is left)
-            // Map from 0...sectorCount-1 to -90...+90 degrees
-            let angleStep = 180.0 / Double(sectorCount - 1)
-            let directionAngle = (Double(bestSector) * angleStep) - 90.0
-            
-            // Update the clear path properties
-            clearPathAngle = directionAngle
-            isPathClear = bestScore >= clearPathThreshold
-            
-            // Update obstacle presence flags for visualization
-            leftObstaclePresent = bestSector > sectorCount/2
-            rightObstaclePresent = bestSector < sectorCount/2
-            centerObstaclePresent = bestSector == sectorCount/2 && bestScore < clearPathThreshold
-            
-            // No need to set obstacleOffset - we're now using the separate compass
-            parent.obstacleOffset = 0
-            
-            // Update mesh visibility
-            updateMeshVisibility()
+            return nil // No clear path found
         }
 
         func createDepthVisualization(depthMap: CVPixelBuffer) -> UIImage? {
@@ -494,9 +632,9 @@ struct ARWrapper: UIViewRepresentable {
             
             let pixelBuffer = buffer.bindMemory(to: UInt8.self, capacity: rotatedHeight * rotatedBytesPerRow)
             
-            // Define min/max depth range for visualization
+            // Define min/max depth range for visualization - FIXED at 4.0 meters
             let minDepth: Float = 0.0
-            let maxDepth: Float = 3.0  // 3 meters
+            let maxDepth: Float = 4.0 // Fixed at 4.0 meters for consistent visualization
             
             // Use parent's shift values
             let horizontalShift = parent.depthHorizontalShift
@@ -770,10 +908,10 @@ struct ARWrapper: UIViewRepresentable {
             let gridWidth = 16  // Use a 16x12 grid for clustering
             let gridHeight = 12
             
-            // Set up distance thresholds for color coding - using the configurable values
+            // Set up distance thresholds for color coding - using fixed values
             let nearThreshold: Float = parent.minClearDistance * 0.67  // ~2/3 of min clear distance is "near"
             let midThreshold: Float = parent.minClearDistance  // exactly at min clear distance is "mid"
-            let maxDepthDistance = parent.maxDepthDistance  // Use the configurable max distance
+            let maxVisualDepth: Float = 4.0  // Visual range is 4.0 meters for consistency
             
             // Create rotated grid for proper orientation (matching the full depth view)
             // When we rotate 90° counterclockwise, width and height are swapped
@@ -785,6 +923,7 @@ struct ARWrapper: UIViewRepresentable {
             // Create clusters data structure (average depth and count for each cell)
             var clusterDepths = [[Float]](repeating: [Float](repeating: 0, count: gridWidth), count: gridHeight)
             var clusterCounts = [[Int]](repeating: [Int](repeating: 0, count: gridWidth), count: gridHeight)
+            var beyondRangeClusters = [[Bool]](repeating: [Bool](repeating: false, count: gridWidth), count: gridHeight)
             
             // Lock the buffer
             CVPixelBufferLockBaseAddress(depthMap, .readOnly)
@@ -806,12 +945,13 @@ struct ARWrapper: UIViewRepresentable {
                     let offset = (y * bytesPerRow / MemoryLayout<Float32>.size) + x
                     let depth = depthData[offset]
                     
-                    // Skip invalid depth values or those outside our distance range
-                    if depth.isNaN || depth <= 0 || depth > maxDepthDistance {
+                    // Skip invalid depth values but process ALL valid depth points
+                    // (even those beyond visual range)
+                    if depth.isNaN || depth <= 0 {
                         continue
                     }
                     
-                    // Compute rotated coordinates (90° counterclockwise) to match full depth view
+                    // Compute rotated coordinates (90° counterclockwise)
                     let rotatedX = height - 1 - y
                     let rotatedY = x
                     
@@ -822,6 +962,11 @@ struct ARWrapper: UIViewRepresentable {
                     if clusterX < gridWidth && clusterY < gridHeight {
                         clusterDepths[clusterY][clusterX] += depth
                         clusterCounts[clusterY][clusterX] += 1
+                        
+                        // Mark if this cluster has points beyond our visual range
+                        if depth > maxVisualDepth {
+                            beyondRangeClusters[clusterY][clusterX] = true
+                        }
                     }
                 }
             }
@@ -842,7 +987,12 @@ struct ARWrapper: UIViewRepresentable {
                         
                         // Determine color based on distance
                         var color: UIColor
-                        if avgDepth < nearThreshold {
+                        
+                        // Special blue-purple color for points beyond our visual range
+                        if beyondRangeClusters[y][x] {
+                            // Use a distinctive blue-purple color for points beyond visual range
+                            color = UIColor(red: 0.3, green: 0.3, blue: 1.0, alpha: 0.7)  // Bright blue for beyond range
+                        } else if avgDepth < nearThreshold {
                             color = UIColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 0.6)  // Red for near
                         } else if avgDepth < midThreshold {
                             color = UIColor(red: 0.9, green: 0.7, blue: 0.1, alpha: 0.6)  // Yellow for mid
@@ -861,16 +1011,6 @@ struct ARWrapper: UIViewRepresentable {
                         
                         context.setFillColor(color.cgColor)
                         context.fillEllipse(in: circleRect)
-                        
-                        // Optional: Draw depth value for debugging (uncomment if needed)
-                        /*
-                        let depthText = String(format: "%.1f", avgDepth)
-                        let textAttributes: [NSAttributedString.Key: Any] = [
-                            .font: UIFont.systemFont(ofSize: 8),
-                            .foregroundColor: UIColor.white
-                        ]
-                        depthText.draw(in: circleRect, withAttributes: textAttributes)
-                        */
                     }
                 }
             }
