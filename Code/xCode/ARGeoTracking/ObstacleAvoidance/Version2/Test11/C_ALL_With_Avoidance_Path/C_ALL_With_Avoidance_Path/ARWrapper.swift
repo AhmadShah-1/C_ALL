@@ -32,6 +32,7 @@ struct ARWrapper: UIViewRepresentable {
     @Binding var showClusteredDepthOverlay: Bool  // New binding for simplified cluster overlay
     @Binding var maxDepthDistance: Float    // New binding for configurable max depth distance
     @Binding var minClearDistance: Float    // New binding for minimum clear path distance
+    @Binding var guidanceInstruction: Int   // -1: Turn Left, 0: Straight/Blocked, 1: Turn Right
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -142,10 +143,19 @@ struct ARWrapper: UIViewRepresentable {
         var centerObstacleMeshEntity: ModelEntity?
         var obstacleAnchor: AnchorEntity?
         
-        // Obstacle detection parameters
+        // Obstacle detection parameters - Keep track of the last known state
         var leftObstaclePresent: Bool = false
         var rightObstaclePresent: Bool = false
         var centerObstaclePresent: Bool = false
+        private var lastKnownIsPathClear: Bool = false
+        private var lastKnownClearPathAngle: Double = 0.0
+        private var lastKnownGuidanceInstruction: Int = 0 // Track internal state
+
+        // --- Add state tracking for parent updates ---
+        private var lastSentIsUsingLidar: Bool? = nil
+        private var lastSentClearPathAngle: Double? = nil
+        private var lastSentIsPathClear: Bool? = nil
+        private var lastSentGuidanceInstruction: Int? = nil // Track sent state
 
         // Add scene mesh visualization properties
         var sceneMeshAnchor: AnchorEntity?
@@ -158,6 +168,7 @@ struct ARWrapper: UIViewRepresentable {
 
         // Add a frame counter to limit processing frequency
         private var frameCounter = 0
+        private let depthProcessingFrameInterval = 5 // Process depth every 5 frames
         private var lastProcessingTime = CFAbsoluteTimeGetCurrent()
         
         // Add automatic cleanup
@@ -166,9 +177,9 @@ struct ARWrapper: UIViewRepresentable {
         // Outside any function, at class/struct level:
         private var depthFrameCounter = 0
         
-        // Add these properties for clear path detection
-        private var clearPathAngle: Double = 0.0
-        private var isPathClear: Bool = false
+        // Add properties for angle smoothing
+        private var smoothedClearPathAngleRadians: Float? = nil
+        private let angleSmoothingFactor: Float = 0.2 // Adjust for more/less smoothing (lower = more smoothing)
         
         // Cached clustered depth image
         private var clusteredDepthImage: UIImage?
@@ -180,16 +191,16 @@ struct ARWrapper: UIViewRepresentable {
             
             // Setup a timer for periodic cleanup
             cleanupTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
-                self?.performMemoryCleanup()
+                // self?.performMemoryCleanup() // Comment out noisy cleanup log
             }
             
             // Check device capability for LiDAR at initialization
-            if #available(iOS 14.0, *) {
-                let deviceHasLiDAR = ARConfiguration.supportsFrameSemantics(.sceneDepth)
-                print("DEBUG: Coordinator init - Device has LiDAR: \(deviceHasLiDAR)")
-            } else {
-                print("DEBUG: Coordinator init - iOS < 14.0, no LiDAR support expected")
-            }
+            // if #available(iOS 14.0, *) {
+            //     let deviceHasLiDAR = ARConfiguration.supportsFrameSemantics(.sceneDepth)
+            //     print("DEBUG: Coordinator init - Device has LiDAR: \(deviceHasLiDAR)")
+            // } else {
+            //     print("DEBUG: Coordinator init - iOS < 14.0, no LiDAR support expected")
+            // }
         }
 
         deinit {
@@ -209,7 +220,7 @@ struct ARWrapper: UIViewRepresentable {
                 // Just creating an autorelease pool can help with memory
             }
             
-            print("DEBUG: Memory cleanup performed")
+            print("DEBUG: Memory cleanup performed") // Keep?
         }
 
         func updateRouteIfNeeded(newCoordinates: [CLLocationCoordinate2D]) {
@@ -248,173 +259,236 @@ struct ARWrapper: UIViewRepresentable {
 
         /// Called every frame.
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            // Throttle processing for better performance
             frameCounter += 1
-            if frameCounter % 2 != 0 {
-                return  // Process every other frame
+
+            // --- Only process depth data periodically ---
+            guard frameCounter % depthProcessingFrameInterval == 0 else {
+                // On skipped frames, do NOT update UI state, just maintain internal state.
+                updateMeshVisibility() // Update mesh visibility based on last known internal state
+                return
             }
-            
-            // Update obstacle mesh positions
+
+            // Update obstacle mesh positions (can happen every frame)
             positionObstacleMeshes()
-            
-            // Process depth or feature points for obstacle detection
-            if frame.sceneDepth != nil {
+
+            // Process depth data if available
+            if let depth = frame.sceneDepth {
                 // Use depth data for obstacle detection and clear path finding
-                if let clearPathAngleRadians = findClearPathFromDepthData(frame: frame) {
-                    // Convert radians to degrees and update clearPath properties
-                    // IMPORTANT: In our coordinate system 0 is front, π/2 is left, 3π/2 is right
-                    let angleInDegrees = Double(clearPathAngleRadians * 180 / Float.pi)
-                    clearPathAngle = angleInDegrees
-                    isPathClear = true
+                if let rawClearPathAngleRadians = findClearPathFromDepthData(frame: frame) {
                     
-                    // FIXED: The correct interpretation of angles for obstacle presence
-                    // When clearPathAngle is on the left half of the circle (0-π),
-                    // it means the obstacle is on the right,
-                    // When clearPathAngle is on the right half of the circle (π-2π),
-                    // it means the obstacle is on the left
-                    
-                    // π/2 (90°) is left, 3π/2 (270°) is right in our coordinate system
-                    let leftDirection: Float = Float.pi / 2
-                    let rightDirection: Float = 3 * Float.pi / 2
-                    
-                    // Determine where the clear path is pointing (left side or right side)
-                    let angularDistanceToLeft = min(
-                        abs(clearPathAngleRadians - leftDirection),
-                        abs(clearPathAngleRadians - (leftDirection + 2 * Float.pi))
-                    )
-                    let angularDistanceToRight = min(
-                        abs(clearPathAngleRadians - rightDirection),
-                        abs(clearPathAngleRadians - (rightDirection + 2 * Float.pi))
-                    )
-                    
-                    // If the clear path is closer to left direction, obstacle is on right
-                    // If the clear path is closer to right direction, obstacle is on left
-                    rightObstaclePresent = angularDistanceToLeft < angularDistanceToRight
-                    leftObstaclePresent = angularDistanceToRight < angularDistanceToLeft
-                    centerObstaclePresent = false
-                    
-                    if frameCounter % 300 == 0 {
-                        print("ANGLE DEBUG: Clear path angle: \(angleInDegrees)°")
-                        print("ANGLE DEBUG: Left obstacle: \(leftObstaclePresent), Right obstacle: \(rightObstaclePresent)")
-                        print("ANGLE DEBUG: Angular distance to left: \(angularDistanceToLeft), to right: \(angularDistanceToRight)")
+                    // --- Apply Smoothing ---
+                    if smoothedClearPathAngleRadians == nil {
+                        smoothedClearPathAngleRadians = rawClearPathAngleRadians // Initialize on first valid reading
+                    } else {
+                        // Exponential Moving Average
+                        smoothedClearPathAngleRadians = (angleSmoothingFactor * rawClearPathAngleRadians) + ((1.0 - angleSmoothingFactor) * smoothedClearPathAngleRadians!)
                         
-                        // Print the detected direction interpretation
-                        let normalizedAngle = (angleInDegrees + 360).truncatingRemainder(dividingBy: 360)
-                        if normalizedAngle > 0 && normalizedAngle < 180 {
-                            print("ANGLE DEBUG: Clear path in LEFT half (0-180°) - Suggests turning LEFT")
-                        } else {
-                            print("ANGLE DEBUG: Clear path in RIGHT half (180-360°) - Suggests turning RIGHT")
+                        // Handle wrap-around for smoothing (ensure angle stays in 0 to 2pi)
+                         if smoothedClearPathAngleRadians! < 0 { smoothedClearPathAngleRadians! += 2 * Float.pi }
+                         if smoothedClearPathAngleRadians! >= 2 * Float.pi { smoothedClearPathAngleRadians! -= 2 * Float.pi }
+                    }
+
+                    // Use the smoothed angle for calculations and UI
+                    let smoothedAngleDegrees = Double(smoothedClearPathAngleRadians! * 180 / Float.pi)
+                    lastKnownClearPathAngle = smoothedAngleDegrees
+                    lastKnownIsPathClear = true
+
+                    // --- Interpret Smoothed Angle relative to CORRECTED Forward (0 degrees) ---
+                    let forwardDirection: Float = 0.0 // 0 degrees = Forward in calculated system
+                    let tolerance: Float = Float.pi / 12 // +/- 15 degrees tolerance
+                    let twoPi: Float = 2 * Float.pi
+
+                    let angle = smoothedClearPathAngleRadians!
+                    
+                    // Calculate shortest distance to forward (0 degrees), handling wrap-around
+                    let diffToForward = abs(angle - forwardDirection)
+                    let distanceToForward = min(diffToForward, twoPi - diffToForward)
+
+                    if distanceToForward <= tolerance {
+                        // Angle is Forward (within tolerance of 0 degrees)
+                        leftObstaclePresent = false
+                        rightObstaclePresent = false
+                        centerObstaclePresent = false // Path clear ahead
+                    } else if angle > tolerance && angle < Float.pi - tolerance { 
+                        // Angle is Right of Forward (approx 15° to 165°) -> Path is Right
+                        leftObstaclePresent = true  // OBSTACLE IS LEFT
+                        rightObstaclePresent = false
+                        centerObstaclePresent = false
+                    } else if angle > Float.pi + tolerance && angle < twoPi - tolerance {
+                        // Angle is Left of Forward (approx 195° to 345°) -> Path is Left
+                        leftObstaclePresent = false
+                        rightObstaclePresent = true // OBSTACLE IS RIGHT
+                        centerObstaclePresent = false
+                    } else {
+                        // Angle is backward or near +/- 180 degrees (invalid for forward path)
+                        // Treat as forward path blocked/uncertain.
+                        leftObstaclePresent = false // Reset
+                        rightObstaclePresent = false // Reset
+                        centerObstaclePresent = true // Indicate forward blockage/uncertainty
+                        lastKnownGuidanceInstruction = 0 // Reset guidance
+                        if frameCounter % 300 == 0 { print("ANGLE DEBUG: Smoothed angle (\(angle * 180 / Float.pi)°) points backward/invalid. Assuming forward path blocked.") }
+                    }
+
+                    // --- Calculate Guidance Instruction based on flags --- REVERSED
+                    var currentGuidance: Int = 0
+                    if leftObstaclePresent { // Obstacle Left -> Turn Left
+                        currentGuidance = -1 // Swapped from 1
+                    } else if rightObstaclePresent { // Obstacle Right -> Turn Right
+                        currentGuidance = 1  // Swapped from -1
+                    } else { // Straight or Blocked
+                        currentGuidance = 0
+                    }
+
+                    // --- Store calculated guidance instruction internally ---
+                    lastKnownGuidanceInstruction = currentGuidance
+
+                    // Debug prints using smoothed angle (Keep these)
+                    if frameCounter % 300 == 0 { // Print less frequently
+                         print("ANGLE DEBUG (Smoothed): Clear path angle: \(smoothedAngleDegrees)° (Raw: \(rawClearPathAngleRadians * 180 / Float.pi)°)")
+                         print("ANGLE DEBUG (Flags Set): Left Obstacle: \(leftObstaclePresent), Right Obstacle: \(rightObstaclePresent), Center Obstacle: \(centerObstaclePresent)")
+                         // Optional: Keep distance refs if helpful, otherwise remove
+                         // print("ANGLE DEBUG (Smoothed): Dist to 90° ref: \(angularDistanceToLeftRef), Dist to 270° ref: \(angularDistanceToRightRef)")
+                    }
+                    
+                    // Update mesh visibility based on current obstacle flags
+                    updateMeshVisibility()
+                    
+                    // --- Update Visualizations (less frequently or if needed) ---
+                    let shouldUpdateVisuals = frameCounter % (depthProcessingFrameInterval * 2) == 0 // Further reduce viz updates
+
+                    if parent.showDepthOverlay && shouldUpdateVisuals {
+                        parent.depthImage = createDepthVisualization(depthMap: depth.depthMap)
+                    }
+                    
+                    if parent.showClusteredDepthOverlay && shouldUpdateVisuals {
+                        clusteredDepthImage = createClusteredDepthVisualization(frame: frame)
+                        parent.depthImage = clusteredDepthImage
+                    }
+                    
+                    // Update parent state (use last known values) - ONLY IF CHANGED
+                    DispatchQueue.main.async {
+                        let currentIsUsingLidar = true // Since we are in the depth processing block
+                        var didUpdate = false
+                        
+                        if self.lastSentIsUsingLidar != currentIsUsingLidar {
+                            self.parent.isUsingLidar = currentIsUsingLidar
+                            self.lastSentIsUsingLidar = currentIsUsingLidar
+                            didUpdate = true
                         }
+                        if self.lastSentClearPathAngle != self.lastKnownClearPathAngle {
+                            self.parent.clearPathAngle = self.lastKnownClearPathAngle
+                            self.lastSentClearPathAngle = self.lastKnownClearPathAngle
+                            didUpdate = true
+                        }
+                        if self.lastSentIsPathClear != self.lastKnownIsPathClear {
+                            self.parent.isPathClear = self.lastKnownIsPathClear
+                            self.lastSentIsPathClear = self.lastKnownIsPathClear
+                            didUpdate = true
+                        }
+                        if self.lastSentGuidanceInstruction != currentGuidance {
+                            self.parent.guidanceInstruction = currentGuidance
+                            self.lastSentGuidanceInstruction = currentGuidance
+                            didUpdate = true
+                        }
+                        // if didUpdate { print("DEBUG: UI State Updated") } // Optional: for debugging UI updates
                     }
                 } else {
-                    // No clear path found
-                    isPathClear = false
-                    // Default to uncertain state for obstacles
-                    leftObstaclePresent = true
-                    rightObstaclePresent = true
-                    centerObstaclePresent = true
+                    // No clear path found this frame
+                    lastKnownIsPathClear = false
+                    smoothedClearPathAngleRadians = nil // Reset smoother
+                     if frameCounter % 300 == 0 { print("ANGLE DEBUG: No clear path found this frame. Resetting side flags.") }
+                    
+                    // --- Reset obstacle flags when no clear path is found ---
+                    leftObstaclePresent = false
+                    rightObstaclePresent = false
+                    centerObstaclePresent = true // Indicate forward path uncertain/blocked
+                    lastKnownGuidanceInstruction = 0 // Reset guidance when path lost
+
+                    // --- Update parent state ONLY IF 'isPathClear' changed ---
+                     DispatchQueue.main.async {
+                         if self.lastSentIsPathClear != self.lastKnownIsPathClear {
+                             self.parent.isPathClear = self.lastKnownIsPathClear
+                             self.lastSentIsPathClear = self.lastKnownIsPathClear
+                             // Maybe also update angle to 0 or a specific value when path is lost?
+                             // self.parent.clearPathAngle = 0
+                             // self.lastSentClearPathAngle = 0
+                         }
+                         // Also update lidar status if needed
+                          let currentIsUsingLidar = true // Still using lidar attempt even if path not found
+                          if self.lastSentIsUsingLidar != currentIsUsingLidar {
+                              self.parent.isUsingLidar = currentIsUsingLidar
+                              self.lastSentIsUsingLidar = currentIsUsingLidar
+                          }
+                          // Also reset guidance instruction if lidar is lost
+                          if self.lastSentGuidanceInstruction != 0 {
+                              self.parent.guidanceInstruction = 0
+                              self.lastSentGuidanceInstruction = 0
+                          }
+                     }
                 }
                 
-                // Update mesh visibility based on obstacle flags
+                // Update mesh visibility based on current internal obstacle flags
                 updateMeshVisibility()
                 
-                // Update depth visualization if enabled
-                if parent.showDepthOverlay {
-                    parent.depthImage = createDepthVisualization(depthMap: frame.sceneDepth!.depthMap)
+                // --- Update Visualizations (less frequently or if needed) ---
+                let shouldUpdateVisuals = frameCounter % (depthProcessingFrameInterval * 2) == 0 // Further reduce viz updates
+
+                if parent.showDepthOverlay && shouldUpdateVisuals {
+                    parent.depthImage = createDepthVisualization(depthMap: depth.depthMap)
                 }
                 
-                // Update clustered depth overlay if enabled (but at a lower frequency)
-                if parent.showClusteredDepthOverlay && (frameCounter % 10 == 0 || clusteredDepthImage == nil) {
-                    // Only update cluster visualization every 10 frames for performance
+                if parent.showClusteredDepthOverlay && shouldUpdateVisuals {
                     clusteredDepthImage = createClusteredDepthVisualization(frame: frame)
                     parent.depthImage = clusteredDepthImage
                 }
                 
                 // Print depth settings occasionally for debugging
-                if frameCounter % 300 == 0 {
-                    print("DEBUG: Using fixed 4.0m maximum range with minimum clear distance: \(parent.minClearDistance)m")
-                    print("DEBUG: Clear path available: \(isPathClear), angle: \(clearPathAngle)°")
-                }
+                // if frameCounter % 300 == 0 {
+                //     // Print point distribution grid
+                //     print("Depth Point Distribution (5x5 grid):")
+                //     for row in depthPointsGrid {
+                //         let rowStr = row.map { $0 > 0 ? "O" : "·" }.joined()
+                //         print(rowStr)
+                //     }
+                    
+                //     print("Clear Point Distribution (5x5 grid):")
+                //     for row in clearPointsGrid {
+                //         let rowStr = row.map { $0 > 0 ? "C" : "·" }.joined()
+                //         print(rowStr)
+                //     }
+                    
+                //     print("Sector occupation (0° → 360°): \(sectorDebug)")
+                //     print("Total sampled: \(totalSampledPoints), Valid: \(validSamplePoints), Beyond range: \(beyondRangePoints) (\(Float(beyondRangePoints)/Float(validSamplePoints) * 100)% of valid points)")
+                //     print("Using min clear distance: \(minClearDistance)m, max visual range: \(maxDepthDistance)m")
+                // }
+            } else {
+                // --- Handle case where frame.sceneDepth is nil ---
+                smoothedClearPathAngleRadians = nil // Reset smoother
                 
+                // --- Update parent state ONLY IF 'isUsingLidar' changed ---
                 DispatchQueue.main.async {
-                    self.parent.isUsingLidar = true
-                    self.parent.clearPathAngle = self.clearPathAngle
-                    self.parent.isPathClear = self.isPathClear
+                    let currentIsUsingLidar = false
+                    if self.lastSentIsUsingLidar != currentIsUsingLidar {
+                        self.parent.isUsingLidar = currentIsUsingLidar
+                        self.lastSentIsUsingLidar = currentIsUsingLidar
+                    }
+                    // Also ensure path clear is false if lidar is lost
+                    if self.lastSentIsPathClear != false {
+                         self.parent.isPathClear = false
+                         self.lastSentIsPathClear = false
+                    }
+                    // Also reset guidance instruction if lidar is lost
+                    if self.lastSentGuidanceInstruction != 0 {
+                        self.parent.guidanceInstruction = 0
+                        self.lastSentGuidanceInstruction = 0
+                    }
                 }
-            } else {
-                // Use feature points for basic obstacle detection
-                updateObstacleOffsetFromFeaturePoints(frame: frame)
-                DispatchQueue.main.async {
-                    self.parent.isUsingLidar = false
-                }
+                 // Update mesh visibility based on *last known* internal state
+                updateMeshVisibility()
             }
             
-            // Clean up resources periodically
+            // Clean up resources periodically (can stay as is)
             cleanupUnusedResources()
-        }
-
-        /// New function that uses ARKit's raw feature points to compute an obstacle offset.
-        func updateObstacleOffsetFromFeaturePoints(frame: ARFrame) {
-            guard let pointCloud = frame.rawFeaturePoints else {
-                print("No feature points available")
-                self.parent.obstacleOffset = 0
-                return
-            }
-            let points = pointCloud.points  // in world coordinates
-            let cameraTransform = frame.camera.transform
-            let cameraPos = cameraTransform.columns.3.xyz
-            // Get camera coordinate axes.
-            let right = cameraTransform.columns.0.xyz
-            _ = cameraTransform.columns.1.xyz  // Or just remove it if not needed
-            // Define forward such that it points out in front of the camera.
-            // In ARKit, the camera's forward vector is -Z, so we reverse it:
-            let forward = -cameraTransform.columns.2.xyz
-
-            var leftCount = 0
-            var rightCount = 0
-            // Process each feature point.
-            for point in points {
-                let relative = point - cameraPos
-                // Project relative vector onto forward direction.
-                let zComp = simd_dot(relative, forward)
-                // Only consider points that are at least 0.2 meters away.
-                if zComp < 0.2 { continue }
-                // Project onto the right vector.
-                let xComp = simd_dot(relative, right)
-                if xComp < 0 {
-                    leftCount += 1
-                } else {
-                    rightCount += 1
-                }
-            }
-            // Debug prints:
-            print("Left: \(leftCount), Right: \(rightCount)")
-            let diff = leftCount - rightCount
-            let thresholdCount = 20
-            var offset: Double = 0
-            if diff > thresholdCount {
-                // Too many points on left -> obstacle on left -> steer right.
-                offset = 30
-            } else if diff < -thresholdCount {
-                // Too many points on right -> obstacle on right -> steer left.
-                offset = -30
-            } else {
-                offset = 0
-            }
-            self.parent.obstacleOffset = offset
-            
-            // Update obstacle presence flags
-            leftObstaclePresent = diff > thresholdCount
-            rightObstaclePresent = diff < -thresholdCount
-            centerObstaclePresent = false // Could add center detection logic
-            
-            // Update mesh visibility
-            updateMeshVisibility()
-        }
-
-        // (Optional) Old depth-based method; left here for reference.
-        func updateDepthImage(frame: ARFrame) {
-            // Implementation omitted for brevity.
         }
 
         func coachingOverlayViewDidDeactivate(_ coachingOverlayView: ARCoachingOverlayView) {
@@ -478,14 +552,10 @@ struct ARWrapper: UIViewRepresentable {
                     let gridX = min(max(Int((Float(x) / Float(width)) * 5), 0), 4)
                     let gridY = min(max(Int((Float(y) / Float(height)) * 5), 0), 4)
                     
-                    // Calculate angle properly accounting for depth camera orientation
-                    // Apply 90° counterclockwise rotation to align with camera view
-                    // Note that the depth camera's coordinate system may be different than expected
-                    let rotatedRelX = -relY // 90° counterclockwise rotation
-                    let rotatedRelY = relX
-                    
-                    // Calculate angle in 0-2π range with 0 corresponding to straight ahead
-                    var angle = atan2(rotatedRelY, rotatedRelX)
+                    // Calculate angle directly from relative coordinates (atan2(y,x))
+                    // Should result in: 0=Forward, 90=Right, 180=Backward, 270=Left
+                    var angle = atan2(relY, relX)
+                    // Normalize angle to 0 to 2π range
                     if angle < 0 {
                         angle += 2 * Float.pi
                     }
@@ -525,65 +595,68 @@ struct ARWrapper: UIViewRepresentable {
             }
             
             // Find the sector with the most clear space (highest percentage)
-            var maxClearPercentage: Float = 0
+            // --- MODIFIED: Find sector with highest ABSOLUTE number of clear points ---
+            var maxClearPoints: Int = -1 // Use -1 to ensure any sector with points is initially better
             var clearestSectorIndex = -1
             
             // Debug string to visualize sector occupation
-            var sectorDebug = ""
+            // var sectorDebug = ""
             
             for i in 0..<(sectorCount * 2) {
                 if sectorTotalValidPoints[i] > 0 {
                     let clearPercentage = Float(sectorClearPoints[i]) / Float(sectorTotalValidPoints[i])
                     
                     // Build sector visualization (C=clear, X=obstacle)
-                    let sectorChar = clearPercentage >= 0.6 ? "C" : "X"
-                    sectorDebug += sectorChar
+                    // let sectorChar = clearPercentage >= 0.6 ? "C" : "X"
+                    // sectorDebug += sectorChar
                     
                     // Debug: Print sector percentages occasionally
-                    if frameCounter % 300 == 0 && i % 4 == 0 {
-                        let angleInDegrees = Float(i) * sectorWidth * 180 / Float.pi
-                        print("Sector \(i) (\(angleInDegrees)°): \(clearPercentage * 100)% clear (\(sectorClearPoints[i])/\(sectorTotalValidPoints[i]))")
-                    }
+                    // if frameCounter % 300 == 0 && i % 4 == 0 {
+                    //     let angleInDegrees = Float(i) * sectorWidth * 180 / Float.pi
+                    //     print("Sector \(i) (\(angleInDegrees)°): \(clearPercentage * 100)% clear (\(sectorClearPoints[i])/\(sectorTotalValidPoints[i]))")
+                    // }
                     
-                    if clearPercentage > maxClearPercentage {
-                        maxClearPercentage = clearPercentage
+                    // --- Compare based on absolute count --- 
+                    if sectorClearPoints[i] > maxClearPoints {
+                        maxClearPoints = sectorClearPoints[i]
                         clearestSectorIndex = i
                     }
                 } else {
-                    sectorDebug += "·" // Empty sector
+                    // sectorDebug += "·" // Empty sector
                 }
             }
             
             // Print detailed debug information occasionally
-            if frameCounter % 300 == 0 {
-                // Print point distribution grid
-                print("Depth Point Distribution (5x5 grid):")
-                for row in depthPointsGrid {
-                    let rowStr = row.map { $0 > 0 ? "O" : "·" }.joined()
-                    print(rowStr)
-                }
+            // if frameCounter % 300 == 0 {
+            //     // Print point distribution grid
+            //     print("Depth Point Distribution (5x5 grid):")
+            //     for row in depthPointsGrid {
+            //         let rowStr = row.map { $0 > 0 ? "O" : "·" }.joined()
+            //         print(rowStr)
+            //     }
                 
-                print("Clear Point Distribution (5x5 grid):")
-                for row in clearPointsGrid {
-                    let rowStr = row.map { $0 > 0 ? "C" : "·" }.joined()
-                    print(rowStr)
-                }
+            //     print("Clear Point Distribution (5x5 grid):")
+            //     for row in clearPointsGrid {
+            //         let rowStr = row.map { $0 > 0 ? "C" : "·" }.joined()
+            //         print(rowStr)
+            //     }
                 
-                print("Sector occupation (0° → 360°): \(sectorDebug)")
-                print("Total sampled: \(totalSampledPoints), Valid: \(validSamplePoints), Beyond range: \(beyondRangePoints) (\(Float(beyondRangePoints)/Float(validSamplePoints) * 100)% of valid points)")
-                print("Using min clear distance: \(minClearDistance)m, max visual range: \(maxDepthDistance)m")
-            }
+            //     print("Sector occupation (0° → 360°): \(sectorDebug)")
+            //     print("Total sampled: \(totalSampledPoints), Valid: \(validSamplePoints), Beyond range: \(beyondRangePoints) (\(Float(beyondRangePoints)/Float(validSamplePoints) * 100)% of valid points)")
+            //     print("Using min clear distance: \(minClearDistance)m, max visual range: \(maxDepthDistance)m")
+            // }
             
             // If we found a clear sector with sufficient data
-            if clearestSectorIndex >= 0 && maxClearPercentage >= 0.6 { // 60% clear threshold
+            // --- MODIFIED: Check if any clear points were found, maybe add minimum threshold later --- 
+            if clearestSectorIndex >= 0 && maxClearPoints > 5 { // Require at least a few clear points
                 // Calculate the center angle of the sector in radians (0 is front)
                 let sectorAngle = (Float(clearestSectorIndex) + 0.5) * sectorWidth
                 
                 // Debug: Print chosen sector occasionally
-                if frameCounter % 300 == 0 {
-                    print("Clearest sector: \(clearestSectorIndex) (\(maxClearPercentage * 100)% clear)")
-                    print("Angle: \(sectorAngle * 180 / Float.pi)° from front")
-                }
+                // if frameCounter % 300 == 0 {
+                //     print("Clearest sector: \(clearestSectorIndex) (\(maxClearPercentage * 100)% clear)")
+                //     print("Angle: \(sectorAngle * 180 / Float.pi)° from front")
+                // }
                 
                 return sectorAngle
             }
@@ -811,6 +884,10 @@ struct ARWrapper: UIViewRepresentable {
 
         // Update mesh visibility based on obstacle detection
         func updateMeshVisibility() {
+            // --- Add Debug Print Here ---
+            if frameCounter % 15 == 0 { // Print occasionally to avoid spam
+               print("VIS DEBUG: Flags before mesh update: L=\(leftObstaclePresent), R=\(rightObstaclePresent), C=\(centerObstaclePresent)")
+            }
             // Make meshes visible or invisible based on obstacle detection
             leftObstacleMeshEntity?.isEnabled = leftObstaclePresent
             rightObstacleMeshEntity?.isEnabled = rightObstaclePresent

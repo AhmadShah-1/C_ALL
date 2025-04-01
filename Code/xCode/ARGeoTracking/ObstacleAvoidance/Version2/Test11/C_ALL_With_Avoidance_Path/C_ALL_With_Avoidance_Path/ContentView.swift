@@ -29,6 +29,7 @@ struct ContentView: View {
     @State private var maxDepthDistance: Float = 4.0  // Fixed maximum depth distance (4 meters)
     @State private var minClearDistance: Float = 1.5  // Default minimum clear distance (meters)
     @State private var showDistanceControls: Bool = false // Toggle for distance controls
+    @State private var guidanceInstruction: Int = 0 // State for guidance: -1 Left, 0 Straight/Blocked, 1 Right
 
     /// Returns the current target coordinate from the route.
     var nextAnchorCoordinate: CLLocationCoordinate2D? {
@@ -48,80 +49,44 @@ struct ContentView: View {
         return bearing
     }
 
-    /// Returns a directional instruction based on the clear path angle
-    var clearPathDirectionText: String {
-        if !isPathClear {
-            return "CAUTION: No Clear Path"
-        }
-        
-        // In our system, 0° is front, 90° is left, 270° is right
-        // Need to normalize the angle to determine appropriate direction
-        let normalizedAngle = (clearPathAngle + 360).truncatingRemainder(dividingBy: 360)
-        
-        // Check if the path is more toward left or right
-        if normalizedAngle > 0 && normalizedAngle < 180 {
-            // Left half of the circle, so turn left to avoid obstacle on right
-            if normalizedAngle > 30 && normalizedAngle < 150 {
-                return "Turn LEFT for Clear Path"
+    // MARK: - Computed Properties for Guidance (NEW LOGIC based on guidanceInstruction)
+    
+    /// Returns the textual guidance based on the instruction.
+    var guidanceText: String {
+        switch guidanceInstruction {
+        case 1:  // Turn Right
+            return "Turn RIGHT to Avoid Obstacle"
+        case -1: // Turn Left
+            return "Turn LEFT to Avoid Obstacle"
+        default: // 0: Straight or Blocked
+            if isPathClear {
+                return "Proceed Straight"
             } else {
-                return "Continue STRAIGHT AHEAD"
-            }
-        } else {
-            // Right half of the circle, so turn right to avoid obstacle on left
-            if normalizedAngle > 210 && normalizedAngle < 330 {
-                return "Turn RIGHT for Clear Path"
-            } else {
-                return "Continue STRAIGHT AHEAD"
+                return "CAUTION: Path Blocked Ahead"
             }
         }
     }
     
-    /// Returns the color for the direction message
-    var directionMessageColor: Color {
-        if !isPathClear {
-            return .red
+    /// Returns the color for the guidance message.
+    var guidanceColor: Color {
+        switch guidanceInstruction {
+        case 1, -1: // Turning
+            return .yellow
+        default: // Straight or Blocked
+            return isPathClear ? .green : .red
         }
-        
-        // Normalize angle to 0-360 range
-        let normalizedAngle = (clearPathAngle + 360).truncatingRemainder(dividingBy: 360)
-        
-        // Check if we're suggesting a significant turn
-        let isSignificantTurn = (normalizedAngle > 30 && normalizedAngle < 150) || 
-                               (normalizedAngle > 210 && normalizedAngle < 330)
-        
-        return isSignificantTurn ? .yellow : .green
     }
-
-    /// Returns a compass angle that points in the direction the user should turn
-    var compassDirectionAngle: Double {
-        if !isPathClear {
-            return 0 // When no clear path, point straight ahead
+    
+    /// Returns the target angle for the avoidance compass.
+    var avoidanceCompassAngle: Double {
+        switch guidanceInstruction {
+        case 1:  // Turn Right
+            return 45.0 // Point compass 45 degrees right
+        case -1: // Turn Left
+            return -45.0 // Point compass 45 degrees left
+        default: // Straight or Blocked
+            return 0.0 // Point compass straight
         }
-        
-        // Normalize angle to 0-360 range
-        let normalizedAngle = (clearPathAngle + 360).truncatingRemainder(dividingBy: 360)
-        
-        // Determine which way to point the compass
-        if normalizedAngle > 0 && normalizedAngle < 180 {
-            // Left half - obstacle on right, point LEFT
-            // Map angles 30-150 to -45 degrees (left)
-            if normalizedAngle > 30 && normalizedAngle < 150 {
-                // Stronger turn for angles closer to 90°
-                let turnStrength = abs(normalizedAngle - 90) / 60 // 0 to 1 scale
-                return -90 + (turnStrength * 45) // -90° to -45° range
-            }
-        } else {
-            // Right half - obstacle on left, point RIGHT
-            // Map angles 210-330 to 45 degrees (right)
-            if normalizedAngle > 210 && normalizedAngle < 330 {
-                // Stronger turn for angles closer to 270°
-                let turnStrength = abs(normalizedAngle - 270) / 60 // 0 to 1 scale
-                return 90 - (turnStrength * 45) // 90° to 45° range
-            }
-        }
-        
-        // Default to straight (0°) if the angle doesn't suggest a strong direction
-        return 0
     }
 
     var body: some View {
@@ -143,7 +108,8 @@ struct ContentView: View {
                 isPathClear: $isPathClear,
                 showClusteredDepthOverlay: $showClusteredDepthOverlay,
                 maxDepthDistance: $maxDepthDistance,
-                minClearDistance: $minClearDistance
+                minClearDistance: $minClearDistance,
+                guidanceInstruction: $guidanceInstruction
             )
             .edgesIgnoringSafeArea(.all)
             
@@ -158,15 +124,15 @@ struct ContentView: View {
             
             // Direction message at the very top
             if isUsingLidar {
-                Text(clearPathDirectionText)
+                Text(guidanceText)
                     .font(.title2.bold())
                     .foregroundColor(.white)
                     .padding(10)
-                    .background(directionMessageColor.opacity(0.8))
+                    .background(guidanceColor.opacity(0.8))
                     .cornerRadius(10)
                     .padding(.top, 10)
                     .padding(.horizontal)
-                    .animation(.easeInOut, value: clearPathAngle)
+                    .animation(.easeInOut, value: guidanceInstruction)
                     .animation(.easeInOut, value: isPathClear)
             }
             
@@ -215,7 +181,7 @@ struct ContentView: View {
                     // Right section - Avoidance compass
                     if let heading = locationManager.heading?.trueHeading {
                         // Use the transformed angle that points in the direction to turn
-                        AvoidanceCompassView(angle: compassDirectionAngle, isPathClear: isPathClear)
+                        AvoidanceCompassView(angle: avoidanceCompassAngle, isPathClear: isPathClear)
                             .padding()
                             .overlay(
                                 Text("Turn Direction")
