@@ -136,11 +136,18 @@ struct ContentView: View {
         // Normalize to -180 to +180 range for display and servo control
         let normalizedTargetAngle = targetRelativeAngle > 180 ? targetRelativeAngle - 360 : targetRelativeAngle
         
+        // Get the current avoidance angle from the guidance instruction
+        let currentGuidanceInstruction = guidanceInstruction
+        let avoidAngle = avoidanceCompassAngle
+        
+        // Debug logs
+        print("[DEBUG-COMPASS] Guidance Instruction: \(currentGuidanceInstruction), Maps to Avoidance Angle: \(avoidAngle)°")
+        
         // Send target angle to Bluetooth if connected
         bluetoothService.sendTargetAngle(normalizedTargetAngle)
         
         // Send avoidance angle to Bluetooth if connected
-        bluetoothService.sendAvoidanceAngle(avoidanceCompassAngle)
+        bluetoothService.sendAvoidanceAngle(avoidAngle)
     }
 
     var body: some View {
@@ -253,10 +260,15 @@ struct ContentView: View {
                                     .offset(y: 40)
                             )
                             .onChange(of: avoidanceCompassAngle) { _ in
+                                print("[DEBUG-COMPASS] avoidanceCompassAngle changed to: \(avoidanceCompassAngle)°")
                                 updateCompassAngles()
                             }
-                            .onChange(of: guidanceInstruction) { _ in
-                                updateCompassAngles()
+                            .onChange(of: guidanceInstruction) { oldValue, newValue in
+                                print("[DEBUG-COMPASS] guidanceInstruction changed from \(oldValue) to \(newValue)")
+                                // Force immediate Bluetooth update on guidanceInstruction change
+                                DispatchQueue.main.async {
+                                    updateCompassAngles()
+                                }
                             }
                     }
                 }

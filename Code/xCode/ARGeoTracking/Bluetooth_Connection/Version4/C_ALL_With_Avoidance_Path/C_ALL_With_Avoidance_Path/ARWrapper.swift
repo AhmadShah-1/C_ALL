@@ -545,8 +545,10 @@ struct ARWrapper: UIViewRepresentable {
                             didUpdate = true
                         }
                         if self.lastSentGuidanceInstruction != self.lastKnownGuidanceInstruction {
+                            let oldValue = self.parent.guidanceInstruction // Store old value for logging
                             self.parent.guidanceInstruction = self.lastKnownGuidanceInstruction
                             self.lastSentGuidanceInstruction = self.lastKnownGuidanceInstruction
+                            print("[DEBUG-GUIDANCE] Updated guidanceInstruction from \(oldValue) to \(self.lastKnownGuidanceInstruction)")
                             didUpdate = true
                         }
                     }

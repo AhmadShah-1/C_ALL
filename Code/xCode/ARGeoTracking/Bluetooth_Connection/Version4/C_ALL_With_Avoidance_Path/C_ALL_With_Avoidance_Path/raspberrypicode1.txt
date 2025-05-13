@@ -1,0 +1,497 @@
+import threading
+import time
+import pigpio
+import asyncio
+import signal
+import logging
+import dbus
+from bluez_peripheral.gatt.service import Service
+from bluez_peripheral.gatt.characteristic import characteristic, CharacteristicFlags as Flags
+from bluez_peripheral.util import get_message_bus, Adapter
+from bluez_peripheral.advert import Advertisement
+from bluez_peripheral.agent import NoIoAgent
+import collections
+
+# === Configuration Variables ===
+
+# Added configuration for switch debouncing
+DEBOUNCE_SAMPLES = 3  # Number of consistent samples needed to validate switch state
+SWITCH_CHECK_INTERVAL = 0.005  # Seconds between switch state checks
+SWITCH_HISTORY_SIZE = 10  # Size of history window for showing switch state changes
+
+# Add a debug configuration option at the top with other configuration variables
+DEBUG_IGNORE_SWITCHES = True  # Set to True to ignore limit switches for testing 
+
+# === Servo Configuration and Functions ===
+
+# GPIO pins for the servo signals
+TARGET_SERVO_PIN = 17    # Servo for target direction
+AVOIDANCE_SERVO_PIN = 18 # Servo for obstacle avoidance direction
+
+# Limitï¿½switch input pins
+TARGET_MIN_SWITCH, TARGET_MAX_SWITCH = 22, 23
+AVOID_MIN_SWITCH,  AVOID_MAX_SWITCH  = 24, 25
+
+# Servo PWM parameters - Updated to match servo specifications
+SERVO_MIN_PULSE = 500   # microseconds
+SERVO_MAX_PULSE = 2500  # microseconds
+STOP_PULSE = 1500       # neutral pulse width (90 degrees factory setting)
+
+# Servo angle limits
+MAX_ANGLE_RIGHT = 90    # Maximum right turn angle
+MAX_ANGLE_LEFT = -90    # Maximum left turn angle
+
+# Initialize pigpio
+pi = pigpio.pi()
+if not pi.connected:
+    exit("Could not connect to pigpio daemon.")
+
+# Configure limitï¿½switch GPIOs with internal pullï¿½ups (activeï¿½low)
+for pin in (TARGET_MIN_SWITCH, TARGET_MAX_SWITCH,
+            AVOID_MIN_SWITCH,  AVOID_MAX_SWITCH):
+    pi.set_mode(pin, pigpio.INPUT)
+    pi.set_pull_up_down(pin, pigpio.PUD_UP) # enable internal ï¿½50ï¿½ kÎ© pullï¿½up
+
+# === Logging ===
+logging.basicConfig(level=logging.DEBUG,
+                    format="%(asctime)s  %(levelname)-8s  %(message)s")
+logger = logging.getLogger(__name__)
+
+# Global variables
+target_angle_current = 0     # Current target angle
+target_angle_target = 0      # Target angle
+avoidance_angle_current = 0  # Current avoidance angle
+avoidance_angle_target = 0   # Target avoidance angle
+servo_running = True         # Control flag for servo threads
+target_min_pressed = False   # Global flag for target MIN switch state
+target_max_pressed = False   # Global flag for target MAX switch state
+avoid_min_pressed = False    # Global flag for avoidance MIN switch state
+avoid_max_pressed = False    # Global flag for avoidance MAX switch state
+
+# Helper function to convert angle to pulse width
+def angle_to_pulse(angle):
+    """
+    Convert angle to pulse width for servo positioning
+    Input: angle from -90 to +90 degrees
+    Output: pulse width from 500 to 2500 microseconds
+    0 degrees maps to 1500 microseconds (center position)
+    """
+    # Clamp angle to valid range
+    clamped_angle = max(MAX_ANGLE_LEFT, min(MAX_ANGLE_RIGHT, angle))
+    
+    # Map from -90...+90 degrees to 500...2500 microseconds
+    # 0 degrees = 1500 microseconds (center)
+    pulse = STOP_PULSE + (clamped_angle * (SERVO_MAX_PULSE - STOP_PULSE) / MAX_ANGLE_RIGHT)
+    return int(pulse)
+
+# --------------------------------------------------------------------------- #
+#  Initialize servo to center position
+# --------------------------------------------------------------------------- #
+def init_servo_position(servo_pin):
+    """Initialize servo to center position (90 degrees / 1500 microseconds)"""
+    logger.info(f"Initializing servo on pin {servo_pin} to center position")
+    pi.set_servo_pulsewidth(servo_pin, STOP_PULSE)
+    time.sleep(1)  # Give time for servo to reach position
+    return True
+
+# --------------------------------------------------------------------------- #
+# Simplified servo calibration that just centers the servos
+# --------------------------------------------------------------------------- #
+def calibrate_servos_on_boot():
+    """Center both servos on power-up"""
+    global target_angle_current, avoidance_angle_current
+
+    logger.info("Initializing target servo to center position...")
+    try:
+        init_servo_position(TARGET_SERVO_PIN)
+        target_angle_current = 0.0
+        logger.info("Target servo initialized to center (0 degrees)")
+    except Exception as e:
+        logger.error(f"Error initializing target servo: {e}")
+        pi.set_servo_pulsewidth(TARGET_SERVO_PIN, STOP_PULSE)
+        target_angle_current = 0.0
+
+    logger.info("Initializing avoidance servo to center position...")
+    try:
+        init_servo_position(AVOIDANCE_SERVO_PIN)
+        avoidance_angle_current = 0.0
+        logger.info("Avoidance servo initialized to center (0 degrees)")
+    except Exception as e:
+        logger.error(f"Error initializing avoidance servo: {e}")
+        pi.set_servo_pulsewidth(AVOIDANCE_SERVO_PIN, STOP_PULSE)
+        avoidance_angle_current = 0.0
+
+def read_debounced_switch(pin):
+    """Read a switch with software debouncing for more reliable readings"""
+    readings = []
+    for _ in range(DEBOUNCE_SAMPLES):
+        readings.append(pi.read(pin))
+        time.sleep(SWITCH_CHECK_INTERVAL)
+    
+    # True means HIGH (not pressed), False means LOW (pressed)
+    # Most common reading is the debounced state
+    return max(set(readings), key=readings.count)
+
+def print_switch_states():
+    """Read and print all switch states with debouncing"""
+    target_min = read_debounced_switch(TARGET_MIN_SWITCH)
+    target_max = read_debounced_switch(TARGET_MAX_SWITCH)
+    avoid_min = read_debounced_switch(AVOID_MIN_SWITCH)
+    avoid_max = read_debounced_switch(AVOID_MAX_SWITCH)
+    
+    logger.info(f"Switch States (debounced) - TARGET: Min={target_min} Max={target_max}, AVOID: Min={avoid_min} Max={avoid_max}")
+
+def switch_monitor_thread():
+    """Thread to continuously monitor limit switch states and update global flags"""
+    global target_min_pressed, target_max_pressed, avoid_min_pressed, avoid_max_pressed, servo_running
+    
+    # Log that we're starting the monitor
+    logger.info("Starting limit switch monitor thread")
+    
+    # Track previous states to detect changes
+    prev_target_min = False
+    prev_target_max = False
+    prev_avoid_min = False
+    prev_avoid_max = False
+    
+    # Periodically log all switch states for debugging
+    last_log_time = time.time()
+    log_interval = 5.0  # Log every 5 seconds
+    
+    while servo_running:
+        # Read all switch states
+        # When a switch is pressed, it reads LOW (0), so we negate to make pressed = True
+        current_target_min = not pi.read(TARGET_MIN_SWITCH)  # True if pressed (LOW)
+        current_target_max = not pi.read(TARGET_MAX_SWITCH)  # True if pressed (LOW)
+        current_avoid_min = not pi.read(AVOID_MIN_SWITCH)    # True if pressed (LOW)
+        current_avoid_max = not pi.read(AVOID_MAX_SWITCH)    # True if pressed (LOW)
+        
+        # If in debug mode, override the switch states
+        if DEBUG_IGNORE_SWITCHES:
+            target_min_pressed = False
+            target_max_pressed = False
+            avoid_min_pressed = False
+            avoid_max_pressed = False
+            
+            # Only log switch states without affecting motion
+            if time.time() - last_log_time > log_interval:
+                logger.info(f"Switch states (IGNORED): TARGET_MIN={current_target_min}, TARGET_MAX={current_target_max}, AVOID_MIN={current_avoid_min}, AVOID_MAX={current_avoid_max}")
+                last_log_time = time.time()
+        else:
+            # Normal operation - update global flags with current states
+            target_min_pressed = current_target_min
+            target_max_pressed = current_target_max
+            avoid_min_pressed = current_avoid_min
+            avoid_max_pressed = current_avoid_max
+            
+            # Log when switch states change
+            if current_target_min != prev_target_min:
+                logger.info(f"TARGET_MIN switch {'PRESSED' if current_target_min else 'RELEASED'}")
+                prev_target_min = current_target_min
+                
+            if current_target_max != prev_target_max:
+                logger.info(f"TARGET_MAX switch {'PRESSED' if current_target_max else 'RELEASED'}")
+                prev_target_max = current_target_max
+                
+            if current_avoid_min != prev_avoid_min:
+                logger.info(f"AVOID_MIN switch {'PRESSED' if current_avoid_min else 'RELEASED'}")
+                prev_avoid_min = current_avoid_min
+                
+            if current_avoid_max != prev_avoid_max:
+                logger.info(f"AVOID_MAX switch {'PRESSED' if current_avoid_max else 'RELEASED'}")
+                prev_avoid_max = current_avoid_max
+            
+            # Periodically log all switch states
+            if time.time() - last_log_time > log_interval:
+                logger.info(f"Switch states: TARGET_MIN={current_target_min}, TARGET_MAX={current_target_max}, AVOID_MIN={current_avoid_min}, AVOID_MAX={current_avoid_max}")
+                last_log_time = time.time()
+        
+        # Small delay to prevent excessive CPU usage
+        time.sleep(0.05)
+
+def target_servo_control_thread():
+    """Thread for controlling the target direction servo"""
+    global target_angle_current, target_angle_target, servo_running, target_min_pressed, target_max_pressed
+    
+    # Log initial switch states
+    logger.info(f"Initial switch states - TARGET_MIN: {pi.read(TARGET_MIN_SWITCH)}, TARGET_MAX: {pi.read(TARGET_MAX_SWITCH)}")
+    
+    # Variables to track last commanded angle and movement status
+    last_target_angle = target_angle_target
+    last_movement_time = time.time()
+    movement_log_interval = 2.0  # Log movement status every 2 seconds
+    
+    # Initialize to center position
+    pi.set_servo_pulsewidth(TARGET_SERVO_PIN, STOP_PULSE)
+    
+    while servo_running:
+        current_time = time.time()
+        
+        # Check if we have a new target 
+        new_target_received = (last_target_angle != target_angle_target)
+        if new_target_received:
+            logger.info(f"New target angle detected: {target_angle_target} (was {last_target_angle})")
+            last_target_angle = target_angle_target
+            last_movement_time = current_time  # Reset the movement log timer on new commands
+        
+        # Check if we're trying to move beyond limit switches
+        if (target_angle_target > 0 and target_max_pressed) or (target_angle_target < 0 and target_min_pressed):
+            if current_time - last_movement_time > movement_log_interval:
+                switch_name = "MAX" if target_angle_target > 0 else "MIN"
+                logger.info(f"Target servo blocked by {switch_name} limit switch. Target angle: {target_angle_target}")
+                last_movement_time = current_time
+            
+            # Set current position to the limit
+            target_angle_current = MAX_ANGLE_RIGHT if target_angle_target > 0 else MAX_ANGLE_LEFT
+            time.sleep(0.01)
+            continue
+        
+        # Convert angle to pulse width for positioning
+        pulse_width = angle_to_pulse(target_angle_target)
+        
+        # Apply the pulse width to position the servo
+        pi.set_servo_pulsewidth(TARGET_SERVO_PIN, pulse_width)
+        
+        # Log movement periodically
+        if current_time - last_movement_time > movement_log_interval:
+            logger.info(f"Target servo positioned to angle: {target_angle_target} (pulse width: {pulse_width})")
+            last_movement_time = current_time
+        
+        # Update current angle to match target since we're directly positioning the servo
+        target_angle_current = target_angle_target
+        
+        # Small delay for stability
+        time.sleep(0.05)
+
+def avoidance_servo_control_thread():
+    """Thread for controlling the obstacle avoidance servo"""
+    global avoidance_angle_current, avoidance_angle_target, servo_running, avoid_min_pressed, avoid_max_pressed
+    
+    # Log initial switch states
+    logger.info(f"Initial switch states - AVOID_MIN: {pi.read(AVOID_MIN_SWITCH)}, AVOID_MAX: {pi.read(AVOID_MAX_SWITCH)}")
+    
+    # Variables to track last commanded angle and movement status
+    last_avoid_angle = avoidance_angle_target
+    last_movement_time = time.time()
+    movement_log_interval = 2.0  # Log movement status every 2 seconds
+    
+    # Initialize to center position
+    pi.set_servo_pulsewidth(AVOIDANCE_SERVO_PIN, STOP_PULSE)
+    
+    while servo_running:
+        current_time = time.time()
+        
+        # Check if we have a new target
+        new_target_received = (last_avoid_angle != avoidance_angle_target)
+        if new_target_received:
+            logger.info(f"New avoidance angle detected: {avoidance_angle_target} (was {last_avoid_angle})")
+            last_avoid_angle = avoidance_angle_target
+            last_movement_time = current_time  # Reset the movement log timer on new commands
+        
+        # Check if we're trying to move beyond limit switches
+        if (avoidance_angle_target > 0 and avoid_max_pressed) or (avoidance_angle_target < 0 and avoid_min_pressed):
+            if current_time - last_movement_time > movement_log_interval:
+                switch_name = "MAX" if avoidance_angle_target > 0 else "MIN"
+                logger.info(f"Avoidance servo blocked by {switch_name} limit switch. Target angle: {avoidance_angle_target}")
+                last_movement_time = current_time
+            
+            # Set current position to the limit
+            avoidance_angle_current = MAX_ANGLE_RIGHT if avoidance_angle_target > 0 else MAX_ANGLE_LEFT
+            time.sleep(0.01)
+            continue
+        
+        # Convert angle to pulse width for positioning
+        pulse_width = angle_to_pulse(avoidance_angle_target)
+        
+        # Apply the pulse width to position the servo
+        pi.set_servo_pulsewidth(AVOIDANCE_SERVO_PIN, pulse_width)
+        
+        # Log movement periodically
+        if current_time - last_movement_time > movement_log_interval:
+            logger.info(f"Avoidance servo positioned to angle: {avoidance_angle_target} (pulse width: {pulse_width})")
+            last_movement_time = current_time
+        
+        # Update current angle to match target since we're directly positioning the servo
+        avoidance_angle_current = avoidance_angle_target
+        
+        # Small delay for stability
+        time.sleep(0.05)
+
+# Start servo control threads
+calibrate_servos_on_boot()
+
+# Start the switch monitor thread
+monitor_thread = threading.Thread(target=switch_monitor_thread, daemon=True)
+monitor_thread.start()
+
+target_thread = threading.Thread(target=target_servo_control_thread, daemon=True)
+target_thread.start()
+
+avoidance_thread = threading.Thread(target=avoidance_servo_control_thread, daemon=True)
+avoidance_thread.start()
+
+# === BLE Service Definitions ===
+
+class CompassService(Service):
+    SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
+
+    def __init__(self, loop):
+        super().__init__(self.SERVICE_UUID, True)
+        self._target_value = bytearray()
+        self._avoidance_value = bytearray()
+        self.loop = loop
+        logger.info("CompassService initialized")
+        # logger.info(f"Avoidance angle offset set to: {AVOIDANCE_ANGLE_OFFSET} degrees") # Offset is no longer used here
+
+    @characteristic("12345678-1234-5678-1234-56789abcdef1", Flags.READ | Flags.WRITE)
+    def target_characteristic(self, *args, **kwargs):
+        return self._target_value
+
+    @characteristic("12345678-1234-5678-1234-56789abcdef2", Flags.READ | Flags.WRITE)
+    def avoidance_characteristic(self, *args, **kwargs):
+        return self._avoidance_value
+
+    def _set_target_angle(self, data):
+        global target_angle_target
+        
+        if data is None:
+            return self._target_value
+
+        try:
+            angle_str = data.decode('utf-8').strip()
+            new_angle = int(angle_str)
+            self._target_value = data
+            
+            # Update target angle
+            target_angle_target = new_angle
+            
+            logger.info(f"New target angle: {new_angle}")
+            return True
+            
+        except ValueError as ve:
+            logger.error(f"Invalid target angle format: {ve}")
+            return False
+        except Exception as e:
+            logger.error(f"Error processing target data: {e}")
+            return False
+    
+    def _set_avoidance_angle(self, data):
+        global avoidance_angle_target
+        
+        if data is None:
+            return self._avoidance_value
+
+        try:
+            angle_str = data.decode('utf-8').strip()
+            new_angle = int(angle_str) # Consider float(angle_str) if iPhone sends decimals
+            self._avoidance_value = data
+            
+            # Directly use the new_angle as the target.
+            # The AVOIDANCE_ANGLE_OFFSET logic is removed.
+            # The iPhone is now responsible for sending the precise angle desired.
+            adjusted_angle = float(new_angle) # Use float for target consistency if new_angle can be float
+            
+            # Set the target angle
+            avoidance_angle_target = adjusted_angle
+            
+            logger.info(f"New avoidance angle: {new_angle} (directly applied)")
+            return True
+            
+        except ValueError as ve:
+            logger.error(f"Invalid avoidance angle format: {ve}")
+            return False
+        except Exception as e:
+            logger.error(f"Error processing avoidance data: {e}")
+            return False
+
+# Set the setter functions for the characteristics
+CompassService.target_characteristic.setter_func = lambda service, data, opts: service._set_target_angle(data)
+CompassService.avoidance_characteristic.setter_func = lambda service, data, opts: service._set_avoidance_angle(data)
+
+class BLEServer:
+    def __init__(self, loop):
+        self.service = None
+        self.advertisement = None
+        self.adapter = None
+        self.bus = None
+        self._running = True
+        self.loop = loop
+
+    async def setup(self):
+        try:
+            # Initialize the D-Bus message bus.
+            self.bus = await get_message_bus()
+            logger.info("D-Bus message bus initialized")
+
+            # Register the Bluetooth agent.
+            agent = NoIoAgent()
+            await agent.register(self.bus)
+            logger.info("Bluetooth agent registered")
+
+            # Get the first available Bluetooth adapter.
+            self.adapter = await Adapter.get_first(self.bus)
+            if not self.adapter:
+                raise Exception("No Bluetooth adapter found")
+            logger.info("Bluetooth adapter found")
+
+            # Ensure the adapter is powered on.
+            await self.adapter.set_powered(True)
+            logger.info("Bluetooth adapter powered on")
+
+            # Create and register the BLE service.
+            self.service = CompassService(self.loop)
+            await self.service.register(self.bus)
+            logger.info("BLE service registered")
+
+            # Create and register an advertisement.
+            self.advertisement = Advertisement(
+                localName="raspberrypi-compass",
+                serviceUUIDs=[CompassService.SERVICE_UUID],
+                appearance=0x0000,
+                timeout=0
+            )
+            await self.advertisement.register(self.bus, self.adapter)
+            logger.info("Advertisement registered")
+
+            logger.info("BLE Server setup complete. Waiting for connections... (Press Ctrl+C to stop)")
+        except Exception as e:
+            logger.error(f"Error during setup: {e}")
+            raise
+
+    def stop(self):
+        self._running = False
+        logger.info("Server stopping...")
+
+async def main():
+    try:
+        loop = asyncio.get_running_loop()
+        server = BLEServer(loop)
+        loop.add_signal_handler(signal.SIGINT, server.stop)
+        loop.add_signal_handler(signal.SIGTERM, server.stop)
+
+        await server.setup()
+
+        # Initial servo calibration - center both servos
+        pi.set_servo_pulsewidth(TARGET_SERVO_PIN, STOP_PULSE)
+        pi.set_servo_pulsewidth(AVOIDANCE_SERVO_PIN, STOP_PULSE)
+        logger.info("Servos initialized to center position")
+        time.sleep(1)  # Give time for servos to center
+
+        while server._running:
+            await asyncio.sleep(1)
+    except Exception as e:
+        logger.error(f"Error in main: {e}")
+        raise
+    finally:
+        # Clean up
+        global servo_running
+        servo_running = False  # Stop servo threads
+        target_thread.join()    # Wait for threads to finish
+        avoidance_thread.join()
+        pi.set_servo_pulsewidth(TARGET_SERVO_PIN, STOP_PULSE)
+        pi.set_servo_pulsewidth(AVOIDANCE_SERVO_PIN, STOP_PULSE)
+        pi.stop()
+        logger.info("Server shutdown complete")
+
+if __name__ == '__main__':
+    asyncio.run(main())

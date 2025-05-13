@@ -76,7 +76,12 @@ class BluetoothService: NSObject, ObservableObject {
         let angleString = String(angleInt)
         guard let data = angleString.data(using: .utf8) else { return }
         
-        print("[DEBUG] Sending avoidance angle: \(angleInt)")
+        print("[DEBUG] Sending avoidance angle: \(angleInt)° (from \(angle)°)")
+        
+        // Add more data about the current state
+        let timestamp = Date().timeIntervalSince1970
+        print("[DEBUG-AVOIDANCE] Time: \(timestamp) - Writing angle \(angleInt)° to peripheral: \(peripheral.name ?? "Unknown")")
+        
         peripheral.writeValue(data, for: characteristic, type: .withResponse)
     }
 }
